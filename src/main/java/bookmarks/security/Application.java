@@ -1,10 +1,14 @@
-package demo;
+package bookmarks.security;
 
+import bookmarks.Account;
+import bookmarks.AccountRepository;
+import bookmarks.Bookmark;
+import bookmarks.BookmarkRepository;
 import com.fasterxml.jackson.annotation.JsonIgnore;
 import org.apache.coyote.http11.Http11NioProtocol;
+import org.springframework.beans.factory.InitializingBean;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
-import org.springframework.boot.CommandLineRunner;
 import org.springframework.boot.SpringApplication;
 import org.springframework.boot.autoconfigure.EnableAutoConfiguration;
 import org.springframework.boot.context.embedded.ConfigurableEmbeddedServletContainer;
@@ -16,13 +20,10 @@ import org.springframework.context.annotation.ComponentScan;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.context.annotation.Profile;
 import org.springframework.core.io.Resource;
-import org.springframework.core.task.AsyncTaskExecutor;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
-import org.springframework.scheduling.annotation.AsyncResult;
-import org.springframework.scheduling.concurrent.ConcurrentTaskExecutor;
 import org.springframework.security.authentication.AuthenticationManager;
 import org.springframework.security.config.annotation.authentication.builders.AuthenticationManagerBuilder;
 import org.springframework.security.config.annotation.authentication.configurers.GlobalAuthenticationConfigurerAdapter;
@@ -39,10 +40,7 @@ import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestMethod;
 import org.springframework.web.bind.annotation.RestController;
-import org.springframework.web.context.request.async.DeferredResult;
-import org.springframework.web.context.request.async.WebAsyncTask;
 import org.springframework.web.servlet.support.ServletUriComponentsBuilder;
-import reactor.spring.core.task.RingBufferAsyncTaskExecutor;
 
 import javax.persistence.*;
 import javax.servlet.*;
@@ -50,9 +48,10 @@ import javax.servlet.http.HttpServletRequest;
 import javax.servlet.http.HttpServletResponse;
 import java.io.IOException;
 import java.security.Principal;
-import java.util.*;
-import java.util.concurrent.ExecutorService;
-import java.util.concurrent.Executors;
+import java.util.Arrays;
+import java.util.Collection;
+import java.util.HashSet;
+import java.util.Set;
 
 //
 // curl -X POST -vu android-bookmarks:123456 http://localhost:8080/oauth/token -H "Accept: application/json" -d "password=password&username=jlong&grant_type=password&scope=write&client_secret=123456&client_id=android-bookmarks"
@@ -96,8 +95,7 @@ public class Application {
     @Profile("ssl")
     @Bean
     EmbeddedServletContainerCustomizer containerCustomizer(@Value("${keystore.file}") Resource keystoreFile,
-                                                           @Value("${keystore.pass}") String keystorePass)
-            throws Exception {
+                                                           @Value("${keystore.pass}") String keystorePass) throws Exception {
 
         String absoluteKeystoreFile = keystoreFile.getFile().getAbsolutePath();
         return (ConfigurableEmbeddedServletContainer container) -> {
@@ -121,21 +119,20 @@ public class Application {
     }
 
     @Bean
-    CommandLineRunner init(AccountRepository accountRepository,
-                           BookmarkRepository bookmarkRepository) {
-        return args ->
-                Arrays.asList("jhoeller", "dsyer", "pwebb", "jlong")
-                        .stream()
-                        .forEach(a -> {
-                            Account account = accountRepository.save(new Account(a, "password"));
-                            bookmarkRepository.save(new Bookmark(account, "http://bookmark.com/" + a, "A description"));
-                        });
+    InitializingBean init(AccountRepository accountRepository,
+                          BookmarkRepository bookmarkRepository) {
+        return () ->
+                Arrays.asList("jhoeller", "dsyer", "pwebb", "jlong").forEach(a -> {
+                    Account account = accountRepository.save(new Account(a, "password"));
+                    bookmarkRepository.save(new Bookmark(account, "http://bookmark.com/" + a, "A description"));
+                });
     }
 
     public static void main(String[] args) {
         SpringApplication.run(Application.class, args);
     }
 }
+
 
 @Configuration
 class WebSecurityConfiguration extends GlobalAuthenticationConfigurerAdapter {
@@ -216,59 +213,4 @@ class BookmarkRestController {
     @Autowired
     AccountRepository accountRepository;
 
-}
-
-interface BookmarkRepository extends JpaRepository<Bookmark, Long> {
-    Collection<Bookmark> findByAccountUsername(String username);
-}
-
-interface AccountRepository extends JpaRepository<Account, Long> {
-    Account findByUsername(String n);
-}
-
-@Entity
-class Account {
-
-    @OneToMany(mappedBy = "account")
-    public Set<Bookmark> bookmarks = new HashSet<>();
-
-    @Id
-    @GeneratedValue
-    public Long id;
-
-    @JsonIgnore
-    public String password;
-    public String username;
-
-    Account(String name, String password) {
-        this.username = name;
-        this.password = password;
-    }
-
-    Account() { // jpa only
-    }
-}
-
-@Entity
-class Bookmark {
-
-    @JsonIgnore
-    @ManyToOne
-    public Account account;
-
-    @Id
-    @GeneratedValue
-    public Long id;
-
-    Bookmark() { // jpa only
-    }
-
-    Bookmark(Account account, String uri, String description) {
-        this.uri = uri;
-        this.description = description;
-        this.account = account;
-    }
-
-    public String uri;
-    public String description;
 }

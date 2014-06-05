@@ -1,20 +1,26 @@
-# Microservice-oriented Architectures 
+# REST with Spring  
 
-It's taken a while, but we've finally agreed upon a name for _that which we all sort of knew, anyway_ - lo, _microservices_!  [_Microservices_](http://martinfowler.com/articles/microservices.html),   describe an architectural style that promotes _singly focused_ services as the basis for sophisticated systems. _It's SOA, but with REST_. At least that's the tagline.  
-
-Communication doesn't _have_ to be REST, it might be done over something messaging-centric, like [AMQP](http://rabbitmq.org) or [0MQ](). 
+REST has quickly become the de-facto standard for building web services on the web. There's a much larger discussion to be had about how REST fits in the world of micro-services, but - for this tutorial - let's just look at building RESTful services.
 
 Why REST? [_REST In Practice_](http://www.amazon.com/gp/product/0596805829?ie=UTF8&tag=martinfowlerc-20&linkCode=as2&camp=1789&creative=9325&creativeASIN=0596805829)  proffers, [to borrow Martin Fowler's phrasing](),  "the notion that the web is an existence proof of a massively scalable distributed system that works really well, and we can take ideas from that to build integrated systems more easily." I think that's a pretty good reason: REST embraces the precepts of the web itself, and embraces its architecture, benefits and all.  
 
-What benefits? ...
+What benefits? Principally all those that come for free with HTTP as a platform itself. Application security (encryption and authentication) are known quantities today for which there are known solutions. Caching is built into the protocol. Service routing, through DNS, is a resilient and well-known system already ubiquitously support. <!-- need to flesh this part out: lots of infrastructure to support HTTP already: routing, caching, security, etc., and all of it can be used here. -->
 
-That still leaves open the question of service granularity. Just how big (or _small_) is a *micro* service? [Chris Richardson](http://twitter.com/crichardson) pointed me to a great talk by [Fred Georges](), out of the UK. Fred and his team sought to grapple with the same question and ultimately the  team decided upon _about 100 lines-of-code_. That's a fairly small number. It's small enough, suggests Fred, that if a service is better expressed in another language, then one should feel no fear in throwing away the existing one and simply rewriting it, _in an afternoon_. It's so small that one could easily find an error, decide it'd be simpler to rewrite the service, and then do so all in the time allotted to debug the existing one. It's so small that the system itself becomes very, very maleable. 
+It's not hard to see why so many people are moving to it.  
 
-As Richardson explains, a functioning application is anything but: instead what we think of as applications today are in actuality typically a connected system of services. There is no single `.jar` or `.war` that you can deploy to get Google.com on your local machine. Services that can be scaled out according to the requirements. Services that can manage only one slice of the pie. 
+REST, however ubiquitous, is not a standard but an approach, a style, a _constraint_ on the HTTP protocol. Its implementation may vary in style, approach. As an API consumer this can be a frustrating experience. The quality of REST services varies wildly.  
 
-So it's going to be smaller than not.  RedHat's Mark Little expands upon this idea in his post, [_Nano Services_](http://www.infoq.com/news/2014/05/nano-services). From the article, "Arnon's point is that services with 10 to 100 lines are likely to be exposing functions rather than being a 'real service.' He also believes that the the smaller the service gets (towards what he calls 'Nano services') the more mangement overhead you have to worry about, serialization/deserialization costs, security etc. Essentially the smaller these services become, the more glue you need to pull them together into a useful 'whole.'" 
+Dr. Leonard Richardson put together a maturity model that interprets various levels of compliance with RESTful principles, and grades them.  It describes 4 levels, starting at *level 0*. Martin Fowler [has a very good write-up on the maturity model](http://martinfowler.com/articles/richardsonMaturityModel.html).  
 
-Little's post suggests that it's hard to imagine useful services at only a 100 LOC. Certainly, such services would need to take for granted common connectivity. monitoring and management concerns. Such services would need to 
+* **Level 0**: the Swamp of POX - 
+* **Level 1**: Resources - 
+* **Level 2**: HTTP Verbs -
+* **Level 3**: Hypermedia Controls - 
+
+<IMG src = "http://martinfowler.com/articles/images/richardsonMaturityModel/overview.png" width = "500" />
+<!-- http://martinfowler.com/articles/richardsonMaturityModel.html  I'm even linking to the image on his post-->
+
+
 
 So we want services that justify (and tow!) their own capacitive weight, so to speak, and we want services to be singly focused, in the UNIX command-line tool tradition. 
 
