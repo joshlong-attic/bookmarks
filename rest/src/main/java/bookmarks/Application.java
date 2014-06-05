@@ -1,6 +1,7 @@
 package bookmarks;
 
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.boot.CommandLineRunner;
 import org.springframework.boot.SpringApplication;
 import org.springframework.boot.autoconfigure.EnableAutoConfiguration;
 import org.springframework.context.ApplicationListener;
@@ -11,16 +12,12 @@ import org.springframework.context.event.ContextRefreshedEvent;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
-import org.springframework.web.bind.annotation.RequestBody;
-import org.springframework.web.bind.annotation.RequestMapping;
-import org.springframework.web.bind.annotation.RequestMethod;
-import org.springframework.web.bind.annotation.RestController;
+import org.springframework.web.bind.annotation.*;
 import org.springframework.web.servlet.support.ServletUriComponentsBuilder;
 
 import java.security.Principal;
 import java.util.Arrays;
 import java.util.Collection;
-
 
 
 @Configuration
@@ -29,14 +26,13 @@ import java.util.Collection;
 public class Application {
 
     @Bean
-    ApplicationListener<ContextRefreshedEvent> init(AccountRepository accountRepository,
-                                                    BookmarkRepository bookmarkRepository) {
+    CommandLineRunner init(AccountRepository accountRepository, BookmarkRepository bookmarkRepository) {
         return (evt) ->
-                Arrays.asList("jhoeller", "dsyer", "pwebb", "jlong").forEach(a -> {
+                Arrays.asList("jhoeller", "dsyer", "pwebb", "ogierke", "rwinch", "mfisher", "mpollack").forEach(a -> {
                     Account account = accountRepository.save(new Account(a, "password"));
-                    bookmarkRepository.save(new Bookmark(account, "http://bookmark.com/" + a, "A description"));
+                    bookmarkRepository.save(new Bookmark(account, "http://bookmark.com/1/" + a, "A description"));
+                    bookmarkRepository.save(new Bookmark(account, "http://bookmark.com/2/" + a, "A description"));
                 });
-
     }
 
     public static void main(String[] args) {
@@ -45,14 +41,18 @@ public class Application {
 }
 
 @RestController
-@RequestMapping("/bookmarks")
+@RequestMapping("/{userId}/bookmarks/")
 class BookmarkRestController {
 
+    private final BookmarkRepository bookmarkRepository;
+
+    private final AccountRepository accountRepository;
+
     @RequestMapping(method = RequestMethod.POST)
-    ResponseEntity<?> add(Principal principal,
+    ResponseEntity<?> add(@PathVariable String userId,
                           @RequestBody Bookmark input) {
 
-        Account account = accountRepository.findByUsername(principal.getName());
+        Account account = accountRepository.findByUsername(userId);
         Bookmark result = bookmarkRepository.save(new Bookmark(account, input.uri, input.description));
 
         HttpHeaders httpHeaders = new HttpHeaders();
@@ -63,14 +63,13 @@ class BookmarkRestController {
     }
 
     @RequestMapping(method = RequestMethod.GET)
-    Collection<Bookmark> read(Principal principal) {
-        return bookmarkRepository.findByAccountUsername(principal.getName());
+    Collection<Bookmark> read(@PathVariable String userId) {
+        return bookmarkRepository.findByAccountUsername(userId);
     }
 
     @Autowired
-    BookmarkRepository bookmarkRepository;
-
-    @Autowired
-    AccountRepository accountRepository;
-
+    BookmarkRestController(BookmarkRepository bookmarkRepository, AccountRepository accountRepository) {
+        this.bookmarkRepository = bookmarkRepository;
+        this.accountRepository = accountRepository;
+    }
 }
