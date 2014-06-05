@@ -1,16 +1,13 @@
-package bookmarks.hateoas;
+package bookmarks;
 
-import bookmarks.Account;
-import bookmarks.AccountRepository;
-import bookmarks.Bookmark;
-import bookmarks.BookmarkRepository;
-import org.springframework.beans.factory.InitializingBean;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.SpringApplication;
 import org.springframework.boot.autoconfigure.EnableAutoConfiguration;
+import org.springframework.context.ApplicationListener;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.ComponentScan;
 import org.springframework.context.annotation.Configuration;
+import org.springframework.context.event.ContextRefreshedEvent;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
@@ -24,26 +21,28 @@ import java.security.Principal;
 import java.util.Arrays;
 import java.util.Collection;
 
+
+
 @Configuration
 @ComponentScan
 @EnableAutoConfiguration
 public class Application {
 
-
     @Bean
-    InitializingBean init(AccountRepository accountRepository,
-                          BookmarkRepository bookmarkRepository) {
-        return () ->
+    ApplicationListener<ContextRefreshedEvent> init(AccountRepository accountRepository,
+                                                    BookmarkRepository bookmarkRepository) {
+        return (evt) ->
                 Arrays.asList("jhoeller", "dsyer", "pwebb", "jlong").forEach(a -> {
                     Account account = accountRepository.save(new Account(a, "password"));
                     bookmarkRepository.save(new Bookmark(account, "http://bookmark.com/" + a, "A description"));
-                });    }
+                });
+
+    }
 
     public static void main(String[] args) {
         SpringApplication.run(Application.class, args);
     }
 }
-
 
 @RestController
 @RequestMapping("/bookmarks")
