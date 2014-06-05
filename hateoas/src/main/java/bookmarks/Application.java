@@ -4,23 +4,25 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.CommandLineRunner;
 import org.springframework.boot.SpringApplication;
 import org.springframework.boot.autoconfigure.EnableAutoConfiguration;
-import org.springframework.context.ApplicationListener;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.ComponentScan;
 import org.springframework.context.annotation.Configuration;
-import org.springframework.context.event.ContextRefreshedEvent;
+import org.springframework.hateoas.*;
+import org.springframework.hateoas.core.LinkBuilderSupport;
+import org.springframework.hateoas.mvc.ControllerLinkBuilder;
+import org.springframework.hateoas.mvc.ControllerLinkBuilderFactory;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.web.servlet.support.ServletUriComponentsBuilder;
 
-import java.security.Principal;
 import java.util.Arrays;
 import java.util.Collection;
 import java.util.List;
 import java.util.stream.Collectors;
 
+import static org.springframework.hateoas.mvc.ControllerLinkBuilder.*;
 
 @Configuration
 @ComponentScan
@@ -42,6 +44,23 @@ public class Application {
     }
 }
 
+class BookmarkResource extends ResourceSupport {
+
+    private final Bookmark bookmark;
+
+    public BookmarkResource(Bookmark bookmark) {
+        String username = bookmark.account.username;
+        this.bookmark = bookmark;
+        this.add(new Link(bookmark.uri, "bookmark-uri"));
+        this.add(linkTo(BookmarkRestController.class, username).withRel("bookmarks"));
+        this.add(linkTo(methodOn(BookmarkRestController.class, username).readBookmark(username, bookmark.id)).withSelfRel());
+    }
+
+    public Bookmark getBookmark() {
+        return bookmark;
+    }
+}
+
 @RestController
 @RequestMapping("/{userId}/bookmarks")
 class BookmarkRestController {
@@ -49,7 +68,6 @@ class BookmarkRestController {
     private final BookmarkRepository bookmarkRepository;
 
     private final AccountRepository accountRepository;
-
 
     @RequestMapping(method = RequestMethod.POST)
     ResponseEntity<?> add(@PathVariable String userId,
@@ -66,13 +84,16 @@ class BookmarkRestController {
     }
 
     @RequestMapping(value = "/{bookmarkId}", method = RequestMethod.GET)
-    Bookmark readBookmark(@PathVariable String userId, @PathVariable Long bookmarkId) {
-        return this.bookmarkRepository.findOne(bookmarkId);
+    BookmarkResource readBookmark(@PathVariable String userId, @PathVariable Long bookmarkId) {
+        return new BookmarkResource(this.bookmarkRepository.findOne(bookmarkId));
     }
 
     @RequestMapping(method = RequestMethod.GET)
-    Collection<Bookmark> readBookmarks(@PathVariable String userId) {
-        return bookmarkRepository.findByAccountUsername(userId);
+    Resources<BookmarkResource> readBookmarks(@PathVariable String userId) {
+        List<BookmarkResource> bookmarkResourceList =
+                bookmarkRepository.findByAccountUsername(userId).stream()
+                        .map(BookmarkResource::new).collect(Collectors.toList());
+        return new Resources<BookmarkResource>(bookmarkResourceList);
     }
 
     @Autowired
