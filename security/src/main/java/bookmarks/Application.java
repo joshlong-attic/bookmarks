@@ -1,7 +1,6 @@
 package bookmarks;
 
 import org.apache.coyote.http11.Http11NioProtocol;
-import org.springframework.beans.factory.InitializingBean;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.CommandLineRunner;
@@ -16,6 +15,9 @@ import org.springframework.context.annotation.ComponentScan;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.context.annotation.Profile;
 import org.springframework.core.io.Resource;
+import org.springframework.hateoas.Link;
+import org.springframework.hateoas.ResourceSupport;
+import org.springframework.hateoas.Resources;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
@@ -31,19 +33,18 @@ import org.springframework.security.oauth2.config.annotation.web.configuration.A
 import org.springframework.security.oauth2.config.annotation.web.configuration.EnableAuthorizationServer;
 import org.springframework.security.oauth2.config.annotation.web.configuration.EnableResourceServer;
 import org.springframework.security.oauth2.config.annotation.web.configurers.AuthorizationServerEndpointsConfigurer;
-import org.springframework.web.bind.annotation.RequestBody;
-import org.springframework.web.bind.annotation.RequestMapping;
-import org.springframework.web.bind.annotation.RequestMethod;
-import org.springframework.web.bind.annotation.RestController;
-import org.springframework.web.servlet.support.ServletUriComponentsBuilder;
+import org.springframework.web.bind.annotation.*;
 
 import javax.servlet.*;
 import javax.servlet.http.HttpServletRequest;
 import javax.servlet.http.HttpServletResponse;
 import java.io.IOException;
-import java.security.Principal;
 import java.util.Arrays;
-import java.util.Collection;
+import java.util.List;
+import java.util.stream.Collectors;
+
+import static org.springframework.hateoas.mvc.ControllerLinkBuilder.linkTo;
+import static org.springframework.hateoas.mvc.ControllerLinkBuilder.methodOn;
 
 //
 // curl -X POST -vu android-bookmarks:123456 http://localhost:8080/oauth/token -H "Accept: application/json" -d "password=password&username=jlong&grant_type=password&scope=write&client_secret=123456&client_id=android-bookmarks"
@@ -119,7 +120,6 @@ public class Application {
                     bookmarkRepository.save(new Bookmark(account, "http://bookmark.com/1/" + a, "A description"));
                     bookmarkRepository.save(new Bookmark(account, "http://bookmark.com/2/" + a, "A description"));
                 });
-
     }
 
     public static void main(String[] args) {
@@ -178,33 +178,60 @@ class OAuth2Configuration extends AuthorizationServerConfigurerAdapter {
     }
 }
 
+
+class BookmarkResource extends ResourceSupport {
+
+    private final Bookmark bookmark;
+
+    public BookmarkResource(Bookmark bookmark) {
+        String username = bookmark.account.username;
+        this.bookmark = bookmark;
+        this.add(new Link(bookmark.uri, "bookmark-uri"));
+        this.add(linkTo(BookmarkRestController.class, username).withRel("bookmarks"));
+        this.add(linkTo(methodOn(BookmarkRestController.class, username).readBookmark(username, bookmark.id)).withSelfRel());
+    }
+
+    public Bookmark getBookmark() {
+        return bookmark;
+    }
+}
+
 @RestController
-@RequestMapping("/bookmarks")
+@RequestMapping("/{userId}/bookmarks")
 class BookmarkRestController {
 
+    private final BookmarkRepository bookmarkRepository;
+
+    private final AccountRepository accountRepository;
+
     @RequestMapping(method = RequestMethod.POST)
-    ResponseEntity<?> add(Principal principal,
+    ResponseEntity<?> add(@PathVariable String userId,
                           @RequestBody Bookmark input) {
 
-        Account account = accountRepository.findByUsername(principal.getName());
-        Bookmark result = bookmarkRepository.save(new Bookmark(account, input.uri, input.description));
+        Account account = accountRepository.findByUsername(userId);
+        Bookmark bookmark = bookmarkRepository.save(new Bookmark(account, input.uri, input.description));
 
         HttpHeaders httpHeaders = new HttpHeaders();
-        httpHeaders.setLocation(ServletUriComponentsBuilder.fromCurrentRequest().path("/{id}")
-                .buildAndExpand(result.id)
-                .toUri());
+        httpHeaders.setLocation(linkTo(methodOn(BookmarkRestController.class, account.username).readBookmark(account.username, bookmark.id)).toUri());
         return new ResponseEntity<>(null, httpHeaders, HttpStatus.CREATED);
     }
 
+    @RequestMapping(value = "/{bookmarkId}", method = RequestMethod.GET)
+    BookmarkResource readBookmark(@PathVariable String userId, @PathVariable Long bookmarkId) {
+        return new BookmarkResource(this.bookmarkRepository.findOne(bookmarkId));
+    }
+
     @RequestMapping(method = RequestMethod.GET)
-    Collection<Bookmark> read(Principal principal) {
-        return bookmarkRepository.findByAccountUsername(principal.getName());
+    Resources<BookmarkResource> readBookmarks(@PathVariable String userId) {
+        List<BookmarkResource> bookmarkResourceList =
+                bookmarkRepository.findByAccountUsername(userId).stream()
+                        .map(BookmarkResource::new).collect(Collectors.toList());
+        return new Resources<BookmarkResource>(bookmarkResourceList);
     }
 
     @Autowired
-    BookmarkRepository bookmarkRepository;
-
-    @Autowired
-    AccountRepository accountRepository;
-
+    BookmarkRestController(BookmarkRepository bookmarkRepository, AccountRepository accountRepository) {
+        this.bookmarkRepository = bookmarkRepository;
+        this.accountRepository = accountRepository;
+    }
 }
