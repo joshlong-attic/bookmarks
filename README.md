@@ -199,20 +199,19 @@ We can use HTTP verbs to manipulate the data represented by those URIs.
 *  the HTTP `PUT` verb tells the service to update the resource designated by a URI with the body of the enclosed request. Thus, to update the resource at `/bob/bookmarks`, I might send the same JSON representation returned from the `GET` call, with updated fields. The service will *replace* the value.
 * the HTTP `POST` verb tells the service to *do something* with the enclosed body of the request. There's no hard and fast rules here, but typically an HTTP `POST` call to `/bob/bookmarks` will *add*, or *append*, the enclosed body to the collection (database, filesystem, whatever) designated by the `/bob/bookmarks` URI. It can be a little confusing, though. An HTTP `POST` to `/bob/bookmarks/1`, on the other hand, might be treated in the same way as an HTTP `PUT` call; the service could take the enclosed body and use it to *replace* the resource designated by the URI. 
 
-Of course, sometimes things don't go to plan. Perhaps the browser timed out, or the service has timed out, or the service encounters an error. We've all gotten the annoying 404 error when attempting to visit a page that doesn't exist. That 404 is a *status code*. It conveys information about the state of the operation. There are *many* status codes.
+Of course, sometimes things don't go to plan. Perhaps the browser timed out, or the service has timed out, or the service encounters an error. We've all gotten the annoying 404 ("Page not found") error when attempting to visit a page that doesn't exist or couldn't be routed to correctly. That 404 is a *status code*. It conveys information about the state of the operation. There are [*many* status codes](http://en.wikipedia.org/wiki/List_of_HTTP_status_codes) divided along ranges for different purposes. When you make a request to a webpage in the browser, it is an HTTP `GET` call, and - if the page shows up - it will have returned a 200 status code. 200 means `OK`; you may not know it, but it's there. 
 
+* Status codes in the **100x range** (from 100-199) are *informational*, and describe the processing fo the request.  
+* Status codes in the **200x range** (from 200-299) indicate  the action requested by the client was received, understood, accepted and processed successfully
+* Status codes in the **300x range** (from 300-399) indicate  that the client must take additional action to complete the request, such as following a *redirect*
+* Status codes in the **400x range** (from 400-499)   is intended for cases in which the client seems to have errored and must correct the request before continuing. The aforementioned 404 is an example of this.
+* Status codes in the **500x range** (from 500-599)  is intended for cases where the server failed to fulfill an apparently valid request.
 
+Spring MVC makes it a breeze to employ all of these constructs in designing your API. 
 
 ## Building a REST service 
 
-Let's start at *Level 2*.  The first cut will support reading and manipulating an account's bookmarks. 
-
-
-he path is rooted at the account's `username`.   For a username `bob`:
-
-* `/bob/bookmarks` supports 
-
-
+The first cut of a bookmark REST service should at least support reading from, and adding to, an account's bookmarks, as well as reading individual ones. Below, `BookmarkRestController` demonstrates a good first cut. 
 
 ```
 package bookmarks;
@@ -300,12 +299,36 @@ class BookmarkRestController {
 }
 ```  
 
+`BookmarkRestController` is a simple Spring MVC `@RestController`-annotated component. `@RestController` exposes the annotated bean's methods as HTTP endpoints using metadata furnished by the `@RequestMapping` annotation on each method. A method will be put into service if an incoming HTTP request matches the qualifications stipulated by the   `@RequestMapping` annotation on the method.  
 
+
+
+ `@RestController`, when it sits at the type level, provides defaults for all the methods in the type. Each individual method may override most of the type-level annotation. Some things are *contextual*. For example, the `BookmarkRestController` handles *all* requests that start with a username (like `bob`) followed by `/bookmarks`. Any methods in the type that further qualify the URI, like `readBookmark`, are *added* to the root request mapping. Thus, `readBookmark` is, in effect, mapped to `/{userId}/bookmarks/{bookmarkId}`. Methods that don't specify a path just inherit the path mapped at the type level. The `add` method responds to the URI specified at the type level, but it *only* responds to HTTP requests with the verb 
+ 
+ The `{userId}` and `{bookmarkId}` tokens in the path are *path variables*. They're globs, or wildcards. Spring MVC will extract those portions of the URI, and make them available as arguments of the same name that are  passed to the controller method and annotated with `@PathVariable`. For an HTTP `GET` request to the URI `/bob/bookmarks/4234`, the `@PathVariable String userId` argument will be `"bob"`, and the `@PathVariable Long bookmarkId` will be coerced to a `long` value of `4234`. 
+ 
+These controller methods return simple POJOs - `Collection<Bookmark>`, and `Bookmark`, etc., in all but the `add` case. Spring MVC converts these return values using *content-negotiation*. Spring MVC will inspect the requested, `Accept`able response mime-types, then find a configured `HttpMessageConverter` that claims to be able to convert objects to that mime type, if one is configured. Spring Boot automatically wires up  an `HttpMessageConverter` that can convert generic `Object`s to [JSON](http://www.json.org/), absent any more specific converter.   `HttpMessageConverter`s work in both directions: incoming requests bodies can be converted to Java objects, and Java objects can be converted into HTTP response bodies. 
+ 
+ The `add` method specifies a parameter of type `Bookmark` - a POJO. Spring MVC will convert the incoming HTTP request (containing, perhaps, valid JSON) to a POJO using the appropriate `HttpMessageConverter`. 
+ 
+The `add` method accepts incoming HTTP requests, saves them and then sends back a `ResponseEntity<T>`. `ResponseEntity` is a wrapper for a response *and*, optionally, HTTP headers and a status code. The `add` method sends back a `ResponseEntity` with a status code of 201 (`CREATED`) and a header (`Location`) that the client can consult to learn how the newly created record is referenable. It's a bit like extracting the just generated primary key after saving a record in the database. 
+
+
+<!-- 
+  TODO a video showing how to put this first example together
+ -->
+ 
 
 ### Testing a REST Service
-<!-- TBD -->
+<!-- TODO this content  -->
 
+<!-- 
+  TODO a video showing how to put this first example together
+ -->
 
+<!-- 
+  TODO resources sections for each major heading?
+ -->
 
 ## Building a HATEOAS REST Service
 
