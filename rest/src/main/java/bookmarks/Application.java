@@ -47,9 +47,7 @@ public class Application {
 class BookmarkRestController {
 
     private final BookmarkRepository bookmarkRepository;
-
     private final AccountRepository accountRepository;
-
 
     @RequestMapping(method = RequestMethod.POST)
     ResponseEntity<?> add(@PathVariable String userId,
