@@ -313,32 +313,42 @@ These controller methods return simple POJOs - `Collection<Bookmark>`, and `Book
  
 The `add` method accepts incoming HTTP requests, saves them and then sends back a `ResponseEntity<T>`. `ResponseEntity` is a wrapper for a response *and*, optionally, HTTP headers and a status code. The `add` method sends back a `ResponseEntity` with a status code of 201 (`CREATED`) and a header (`Location`) that the client can consult to learn how the newly created record is referenable. It's a bit like extracting the just generated primary key after saving a record in the database. 
 
+There are paths not taken. By default Spring Boot sets up a pretty generous collection of `HttpMessageConverter` implementations suitable for common use, but it's easy to add support for other, perhaps more compact formats using the usual Spring MVC configuration.  
+
+Spring MVC natively supports file uploads via controller arguments of type `MultipartResolver multipartResolver`
+
+Spring MVC makes it easy to write service-oriented code whose shape is untainted by `HttpServlet` infrastructure.
+This code can be easily unit tested, extended through Spring AOP. We'll look at how to unit test these Spring MVC components in the next section.
 
 <!-- 
   TODO a video showing how to put this first example together
  -->
- 
+#### Testing a REST Service
+<!-- todo general purpose information on testing REST endponts --> 
 
-### Testing a REST Service
-<!-- TODO this content  -->
 
-<!-- 
-  TODO a video showing how to put this first example together
- -->
-
-<!-- 
-  TODO resources sections for each major heading?
- -->
 
 ## Building a HATEOAS REST Service
+<!-- 
+ 
+ Some of these sentences are from, and inspired by, the very nice Wikipedia article on REST 
+  (http://en.wikipedia.org/wiki/Representational_state_transfer#Uniform_interface)
+  
+-->
+The first cut of the API works very well. If this service were well documented, it would be workable for REST clients in many different languages. It is a clean API. One measure of an API is by its compliance with  the [uniform interface principle](http://en.wikipedia.org/wiki/Representational_state_transfer#Uniform_interface). HTTP REST APIs like the one we have so far stack up pretty well. Each message includes enough information to describe how to process the message. For example, a client might  decide which parser to invoke based on  the `Content-Type` header in the request message. The state in the system is mapped into uniquely identifying resource URIs. State is addressable. Mutations in state are done through known HTTP verbs (`POST`, `GET`, `DELETE`, `PUT`, etc.). Thus,   when a client holds a representation of a resource, including any metadata attached, it has enough information to modify or delete the resource. 
+
+But, we can do better. The services as they stand are adequate to the task but lack.. *staying power*. <wikipedia> Clients must know the API a priori. Changes in the API break clients and they *break* the documentation about the service.  Hypermedia as the engine of application state (a.k.a. [**HATEOAS**](http://en.wikipedia.org/wiki/HATEOAS)) is one more constraint that addresses and removes this coupling.  Clients make state transitions only through actions that are dynamically identified within hypermedia by the server (e.g., by hyperlinks within hypertext). Except for simple fixed entry points to the application, a client does not assume that any particular action is available for any particular resources beyond those described in representations previously received from the server.  </wikipedia>
+ 
+ 
+
 
 
 ## Securing a REST Service with OAuth 
 TODO: talk about storing Access Tokens in a single store that multiple client nodes use for federated ID in mind. Then show how you can use Spring Boot's autoconfiguration approach to share across an organization's services w/ no configuration apart from `@EnableAutoConfiguration`. Show an example of Spring Security OAuth persiting to Redis or something more horizontally scalable than a SQL DB.   
 
 
-### Testing a Secure REST Service
-<!-- Sometimes Rob Winch has to help put out fires, rescue damsels in distress, lead/develop/release one of his 50 or so amazing projects and - ever so infrequently - eat or sleep. Im sure he'd probably help us with this section, too, though. He's busy. But not Rob-busy.  -->
+#### Testing a Secure REST Service
+<!-- Sometimes Rob Winch has to help put out fires, rescue cats from trees, lead/develop/release one of his 50 or so amazing projects and - ever so infrequently - eat or sleep. Im sure he'd probably help us with this section, too, though. He's busy. But not Rob-busy.  -->
 
 ## Consuming an OAuth REST Service 
 
