@@ -75,7 +75,8 @@ class BookmarkRestController {
         Bookmark bookmark = bookmarkRepository.save(new Bookmark(account, input.uri, input.description));
 
         HttpHeaders httpHeaders = new HttpHeaders();
-        httpHeaders.setLocation(linkTo(methodOn(BookmarkRestController.class, account.username).readBookmark(account.username, bookmark.id)).toUri());
+        httpHeaders.setLocation(
+                linkTo(methodOn(BookmarkRestController.class, account.username).readBookmark(account.username, bookmark.id)).toUri());
         return new ResponseEntity<>(null, httpHeaders, HttpStatus.CREATED);
     }
 

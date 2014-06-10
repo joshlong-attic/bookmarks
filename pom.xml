@@ -20,6 +20,8 @@
         <module>security</module>
         <module>model</module>
         <module>hateoas</module>
+        <module>integration</module>
+
     </modules>
     <dependencies> <dependency>
         <groupId>org.springframework.boot</groupId>
