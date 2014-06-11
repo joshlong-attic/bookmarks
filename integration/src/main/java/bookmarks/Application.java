@@ -12,13 +12,18 @@ import org.springframework.integration.annotation.*;
 import org.springframework.integration.channel.DirectChannel;
 import org.springframework.integration.config.ConsumerEndpointFactoryBean;
 import org.springframework.integration.config.EnableIntegration;
+import org.springframework.integration.core.AsyncMessagingTemplate;
 import org.springframework.integration.core.MessageSource;
+import org.springframework.integration.core.MessagingTemplate;
 import org.springframework.integration.dsl.IntegrationFlow;
 import org.springframework.integration.dsl.IntegrationFlows;
 import org.springframework.integration.file.FileReadingMessageSource;
 import org.springframework.integration.file.transformer.FileToStringTransformer;
 import org.springframework.integration.json.JsonToObjectTransformer;
+import org.springframework.integration.support.MessageBuilder;
+import org.springframework.integration.support.MessageBuilderFactory;
 import org.springframework.integration.transformer.ObjectToStringTransformer;
+import org.springframework.messaging.Message;
 import org.springframework.messaging.MessageChannel;
 
 import java.io.File;
@@ -33,30 +38,26 @@ import java.util.Arrays;
 @EnableIntegration
 public class Application {
 
-    public static class BookmarkMessage {
-        URI uri;
-        String description;
+    private static final String REGULAR_REQUESTS_CHANNEL = "requests";
 
-        @Override
-        public String toString() {
-            return "BookmarkMessage{" +
-                    "uri=" + uri +
-                    ", description='" + description + '\'' +
-                    '}';
-        }
+    @Bean(name = REGULAR_REQUESTS_CHANNEL)
+    MessageChannel requests() {
+        return new DirectChannel();
+    }
 
-        public BookmarkMessage(URI uri, String description) {
-            this.uri = uri;
-            this.description = description;
-        }
+    @MessagingGateway(defaultRequestChannel = REGULAR_REQUESTS_CHANNEL)
+    public interface BookmarkGateway {
+        Long bookmark(
+            @Header("username") String username, Long value );
+    }
 
-        public URI getUri() {
-            return uri;
-        }
 
-        public String getDescription() {
-            return description;
-        }
+    @Bean
+    IntegrationFlow regularBookmarkFlow() {
+        return IntegrationFlows.from(REGULAR_REQUESTS_CHANNEL )
+                .transform(new ObjectToStringTransformer())
+                .transform(msg -> 232)
+                .get();
     }
 
     @Bean
@@ -70,8 +71,16 @@ public class Application {
             });
 
 
-            Long id = bookmarkGateway.bookmark("dsyer", new BookmarkMessage( URI.create("http://spring.io"), "The best destination for Spring related content"));
-            System.out.println("id for bookmark: " + id);
+          /*  Long id = bookmarkGateway.bookmark("dsyer", new BookmarkMessage(URI.create("http://spring.io"), "The best destination for Spring related content"));
+            System.out.println("id for bookmark: " + id);*/
+
+            /*MessagingTemplate messagingTemplate = new AsyncMessagingTemplate();
+            Message<?> response =messagingTemplate.sendAndReceive(requests()  ,
+                    MessageBuilder.withPayload(1323232).build() );*/
+
+            Long newValue =  bookmarkGateway.bookmark( "jlong" , 2242332L) ;
+
+            System.out.println( newValue.toString()) ;
 
         };
     }
@@ -80,55 +89,39 @@ public class Application {
         SpringApplication.run(Application.class, args);
     }
 
-    private static final String FILE_REQUESTS_CHANNEL = "fileRequests";
-    private static final String REGULAR_REQUESTS_CHANNEL = "requests";
+}
 
-    @Bean(name = FILE_REQUESTS_CHANNEL)
-    MessageChannel fileRequests() {
-        return new DirectChannel();
+class BookmarkMessage {
+    URI uri;
+    String description;
+
+    @Override
+    public String toString() {
+        return "BookmarkMessage{" +
+                "uri=" + uri +
+                ", description='" + description + '\'' +
+                '}';
     }
 
-    @Bean(name = REGULAR_REQUESTS_CHANNEL)
-    MessageChannel requests() {
-        return new DirectChannel();
+    public BookmarkMessage(URI uri, String description) {
+        this.uri = uri;
+        this.description = description;
     }
 
-    @MessagingGateway(defaultRequestChannel = REGULAR_REQUESTS_CHANNEL)
-    public interface BookmarkGateway {
-        Long bookmark(@Header("username") String username, BookmarkMessage bookmark);
+    public URI getUri() {
+        return uri;
     }
 
-
-    @Bean
-    @InboundChannelAdapter(value = FILE_REQUESTS_CHANNEL, poller = @Poller(fixedDelay = "1000", maxMessagesPerPoll = "1"))
-    FileReadingMessageSource fileReadingMessageSource() throws IOException {
-        FileReadingMessageSource files = new FileReadingMessageSource();
-        files.setAutoCreateDirectory(true);
-        files.setDirectory(new File("/Users/jlong/Desktop/in/"));
-        files.setScanEachPoll(true);
-        return files;
+    public String getDescription() {
+        return description;
     }
+}
 
-
-    @Bean
-    IntegrationFlow regularBookmarkFlow() {
-        return IntegrationFlows.from(this.requests())
-                .transform(new ObjectToStringTransformer())
-                .transform( msg ->  232)
-                .get();
-    }
-
-    @Bean
-    IntegrationFlow fileBookmarkFlow() {
-        return IntegrationFlows.from( FILE_REQUESTS_CHANNEL)
-                .transform(new FileToStringTransformer())
-                .handle(msg -> System.out.println(msg.toString()))
-                .get();
-    }
+@Configuration
+class IntegrationConfiguration {
 
 
 }
-
 
 
 
