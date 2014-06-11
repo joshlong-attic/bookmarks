@@ -39,6 +39,8 @@ import javax.servlet.*;
 import javax.servlet.http.HttpServletRequest;
 import javax.servlet.http.HttpServletResponse;
 import java.io.IOException;
+import java.net.URI;
+import java.security.Principal;
 import java.util.Arrays;
 import java.util.List;
 import java.util.stream.Collectors;
@@ -188,7 +190,7 @@ class BookmarkResource extends ResourceSupport {
         this.bookmark = bookmark;
         this.add(new Link(bookmark.uri, "bookmark-uri"));
         this.add(linkTo(BookmarkRestController.class, username).withRel("bookmarks"));
-        this.add(linkTo(methodOn(BookmarkRestController.class, username).readBookmark(username, bookmark.id)).withSelfRel());
+        this.add(linkTo(methodOn(BookmarkRestController.class, username).readBookmark(null, bookmark.id)).withSelfRel());
     }
 
     public Bookmark getBookmark() {
@@ -197,7 +199,7 @@ class BookmarkResource extends ResourceSupport {
 }
 
 @RestController
-@RequestMapping("/{userId}/bookmarks")
+@RequestMapping("/bookmarks")
 class BookmarkRestController {
 
     private final BookmarkRepository bookmarkRepository;
@@ -205,26 +207,31 @@ class BookmarkRestController {
     private final AccountRepository accountRepository;
 
     @RequestMapping(method = RequestMethod.POST)
-    ResponseEntity<?> add(@PathVariable String userId,
+    ResponseEntity<?> add(Principal principal,
                           @RequestBody Bookmark input) {
 
-        Account account = accountRepository.findByUsername(userId);
-        Bookmark bookmark = bookmarkRepository.save(new Bookmark(account, input.uri, input.description));
+        Account account = accountRepository.findByUsername(principal.getName());
+        Bookmark bookmark = bookmarkRepository.save(
+                new Bookmark(account, input.uri, input.description));
+
+        Link forOneBookmark = new BookmarkResource(bookmark).getLink("self");
 
         HttpHeaders httpHeaders = new HttpHeaders();
-        httpHeaders.setLocation(linkTo(methodOn(BookmarkRestController.class, account.username).readBookmark(account.username, bookmark.id)).toUri());
+        httpHeaders.setLocation(URI.create(forOneBookmark.getHref()));
+
         return new ResponseEntity<>(null, httpHeaders, HttpStatus.CREATED);
     }
 
     @RequestMapping(value = "/{bookmarkId}", method = RequestMethod.GET)
-    BookmarkResource readBookmark(@PathVariable String userId, @PathVariable Long bookmarkId) {
+    BookmarkResource readBookmark(Principal principal,
+                                  @PathVariable Long bookmarkId) {
         return new BookmarkResource(this.bookmarkRepository.findOne(bookmarkId));
     }
 
     @RequestMapping(method = RequestMethod.GET)
-    Resources<BookmarkResource> readBookmarks(@PathVariable String userId) {
+    Resources<BookmarkResource> readBookmarks(Principal principal) {
         List<BookmarkResource> bookmarkResourceList =
-                bookmarkRepository.findByAccountUsername(userId).stream()
+                bookmarkRepository.findByAccountUsername(principal.getName()).stream()
                         .map(BookmarkResource::new).collect(Collectors.toList());
         return new Resources<BookmarkResource>(bookmarkResourceList);
     }

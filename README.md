@@ -315,10 +315,12 @@ The `add` method accepts incoming HTTP requests, saves them and then sends back 
 
 There are paths not taken. By default Spring Boot sets up a pretty generous collection of `HttpMessageConverter` implementations suitable for common use, but it's easy to add support for other, perhaps more compact formats using the usual Spring MVC configuration.  
 
-Spring MVC natively supports file uploads via controller arguments of type `MultipartResolver multipartResolver`
+Spring MVC natively supports file uploads via controller arguments of type `MultipartFile multipartFile`.
 
-Spring MVC makes it easy to write service-oriented code whose shape is untainted by `HttpServlet` infrastructure.
+Spring MVC makes it easy to write service-oriented code whose shape is untainted by `HttpServlet` APIs.
 This code can be easily unit tested, extended through Spring AOP. We'll look at how to unit test these Spring MVC components in the next section.
+
+<!--- todo show some output-->
 
 <!-- 
   TODO a video showing how to put this first example together
@@ -335,15 +337,361 @@ This code can be easily unit tested, extended through Spring AOP. We'll look at 
   (http://en.wikipedia.org/wiki/Representational_state_transfer#Uniform_interface)
   
 -->
-The first cut of the API works very well. If this service were well documented, it would be workable for REST clients in many different languages. It is a clean API. One measure of an API is by its compliance with  the [uniform interface principle](http://en.wikipedia.org/wiki/Representational_state_transfer#Uniform_interface). HTTP REST APIs like the one we have so far stack up pretty well. Each message includes enough information to describe how to process the message. For example, a client might  decide which parser to invoke based on  the `Content-Type` header in the request message. The state in the system is mapped into uniquely identifying resource URIs. State is addressable. Mutations in state are done through known HTTP verbs (`POST`, `GET`, `DELETE`, `PUT`, etc.). Thus,   when a client holds a representation of a resource, including any metadata attached, it has enough information to modify or delete the resource. 
+The first cut of the API works very well. If this service were well documented, it would be workable for REST clients in many different languages. It is a clean API, in that it takes advantage of some of the primitives that HTTP provides, in a well-understood way. One measure of an API is by its compliance with  the [uniform interface principle](http://en.wikipedia.org/wiki/Representational_state_transfer#Uniform_interface). HTTP REST APIs like the one we have so far stack up pretty well. Each message includes enough information to describe how to process the message. For example, a client might  decide which parser to invoke based on  the `Content-Type` header in the request message. The state in the system is mapped into uniquely identifying resource URIs. State is addressable. Mutations in state are done through known HTTP verbs (`POST`, `GET`, `DELETE`, `PUT`, etc.). <wikipedia>Thus, when a client holds a representation of a resource, including any metadata attached, it has enough information to modify or delete the resource. </wikipedia>
 
-But, we can do better. The services as they stand are adequate to the task but lack.. *staying power*. <wikipedia> Clients must know the API a priori. Changes in the API break clients and they *break* the documentation about the service.  Hypermedia as the engine of application state (a.k.a. [**HATEOAS**](http://en.wikipedia.org/wiki/HATEOAS)) is one more constraint that addresses and removes this coupling.  Clients make state transitions only through actions that are dynamically identified within hypermedia by the server (e.g., by hyperlinks within hypertext). Except for simple fixed entry points to the application, a client does not assume that any particular action is available for any particular resources beyond those described in representations previously received from the server.  </wikipedia>
+But, we can do better. The services as they stand are adequate to the task but lack.. *staying power*. <wikipedia> Clients must know the API a priori. Changes in the API break clients and they *break* the documentation about the service.  Hypermedia as the engine of application state (a.k.a. [**HATEOAS**](http://en.wikipedia.org/wiki/HATEOAS)) is one more constraint that addresses and removes this coupling.  Clients make state transitions only through actions that are dynamically identified within hypermedia by the server (e.g., by hyperlinks within hypertext). Except for simple fixed entry points to the application, a client does not assume that any particular action is available for any particular resources beyond those described in representations previously received from the server.  
+</wikipedia>
+
+Let's look at a revised cut of this API, this time embracing  HATEOAS with [Spring HATEOAS](http://spring.io/projects/spring-hateoas).  It is a slight simplification to say that Spring HATEOAS makes it easy to provide links - metadata about payloads being returned to the client - but that is how we will approach it. Fundamentally, all we will do is *wrap* our response payloads using Spring HATEOAS' `ResourceSupport` type. `ResourceSupport` accumulates `Link` objects which in turn describe useful, related resources. For example, a resource describing an account in an e-commerce solution could have a link to the resource for that account's orders, a link to that account's current shopping cart, and a link that can be used to retrieve that resources state again. 
+
+These `Link`s, by the way, are of the same sort as the  `<link/>` element so often used in HTML pages to import CSS stylesheets. They have an `href` attribute and a `rel` attribute. The `href` attribute points to where the CSS stylesheet lives, and the `rel` tells the client (the browser) *why* this resource is important (because it's a stylesheet to be used in rendering the page). It's not hard to translate a `link` element into JSON, either.
+
+<!-- we should spend a minute talking about HAL-->
+
+
+The `BookmarkResource` type *wraps* a `Bookmark` and provides a nice, centralized place to keep link-building logic.  
+At a minimum, a resource should provide a link to itself (usually a link whose `rel` value is `self`). We could simply write out `http://127.0.0.1:8080/{userId}/bookmarks/{id}` (substituing the path variables for appropriate values), but this will fail as soon as we move to a different host, port, and context root. We could use the `ServletUriComponentsBuilder` to simplify some of this work. But why should we? After all, Spring MVC *already knows* about this URI. It's *in* the `@RequestMapping` information on every controller method! Spring HATEOAS provides the convenient static `ControllerLinkBuilder.linkTo` and `ControllerLinkBuilder.methodOn` methods to extract the URI from the controller metadata itself - a marked improvement and in keeping with the DRY (do not repeat yourself) principle.  The example shows how to build a `Link` object directly, specifying an arbitrary value for `href` (in this case, the URI for the bookmark itself), how to build a link based on the `@RequestMapping` metadata on a Spring MVC controller, and how to build a link based on the `@RequestMapping` metadata on a specific Spring MVC controller method.
+
+With this in place, the only remaining changes substitute  `Bookmark` types for `BookmarkResource` types. 
+
+
+
+
+``` 
+package bookmarks;
+
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.boot.CommandLineRunner;
+import org.springframework.boot.SpringApplication;
+import org.springframework.boot.autoconfigure.EnableAutoConfiguration;
+import org.springframework.context.annotation.Bean;
+import org.springframework.context.annotation.ComponentScan;
+import org.springframework.context.annotation.Configuration;
+import org.springframework.hateoas.Link;
+import org.springframework.hateoas.ResourceSupport;
+import org.springframework.hateoas.Resources;
+import org.springframework.http.HttpHeaders;
+import org.springframework.http.HttpStatus;
+import org.springframework.http.ResponseEntity;
+import org.springframework.web.bind.annotation.*;
+
+import java.net.URI;
+import java.util.Arrays;
+import java.util.List;
+import java.util.stream.Collectors;
+
+import static org.springframework.hateoas.mvc.ControllerLinkBuilder.linkTo;
+import static org.springframework.hateoas.mvc.ControllerLinkBuilder.methodOn;
+
+@Configuration
+@ComponentScan
+@EnableAutoConfiguration
+public class Application {
+
+    @Bean
+    CommandLineRunner init(AccountRepository accountRepository, BookmarkRepository bookmarkRepository) {
+        return (evt) ->
+                Arrays.asList("jhoeller", "dsyer", "pwebb", "ogierke", "rwinch", "mfisher", "mpollack").forEach(a -> {
+                    Account account = accountRepository.save(new Account(a, "password"));
+                    bookmarkRepository.save(new Bookmark(account, "http://bookmark.com/1/" + a, "A description"));
+                    bookmarkRepository.save(new Bookmark(account, "http://bookmark.com/2/" + a, "A description"));
+                });
+    }
+
+    public static void main(String[] args) {
+        SpringApplication.run(Application.class, args);
+    }
+}
+
+class BookmarkResource extends ResourceSupport {
+
+    private final Bookmark bookmark;
+
+    public BookmarkResource(Bookmark bookmark) {
+        String username = bookmark.account.username;
+        this.bookmark = bookmark;
+        this.add(new Link(bookmark.uri, "bookmark-uri"));
+        this.add(linkTo(BookmarkRestController.class, username).withRel("bookmarks"));
+        this.add(linkTo(methodOn(BookmarkRestController.class, username).readBookmark(username, bookmark.id)).withSelfRel());
+    }
+
+    public Bookmark getBookmark() {
+        return bookmark;
+    }
+}
+
+@RestController
+@RequestMapping("/{userId}/bookmarks")
+class BookmarkRestController {
+
+    private final BookmarkRepository bookmarkRepository;
+
+    private final AccountRepository accountRepository;
+
+    @RequestMapping(method = RequestMethod.POST)
+    ResponseEntity<?> add(@PathVariable String userId,
+                          @RequestBody Bookmark input) {
+
+        Account account = accountRepository.findByUsername(userId);
+
+        Bookmark bookmark = bookmarkRepository.save(
+                new Bookmark(account, input.uri, input.description));
+
+        HttpHeaders httpHeaders = new HttpHeaders();
+
+        Link forOneBookmark = new BookmarkResource(bookmark).getLink("self");
+        httpHeaders.setLocation(URI.create(forOneBookmark.getHref()));
+
+        return new ResponseEntity<>(null, httpHeaders, HttpStatus.CREATED);
+    }
+
+    @RequestMapping(value = "/{bookmarkId}", method = RequestMethod.GET)
+    BookmarkResource readBookmark(@PathVariable String userId, @PathVariable Long bookmarkId) {
+        return new BookmarkResource(this.bookmarkRepository.findOne(bookmarkId));
+    }
+
+    @RequestMapping(method = RequestMethod.GET)
+    Resources<BookmarkResource> readBookmarks(@PathVariable String userId) {
+        List<BookmarkResource> bookmarkResourceList =
+                bookmarkRepository.findByAccountUsername(userId).stream()
+                        .map(BookmarkResource::new).collect(Collectors.toList());
+        return new Resources<BookmarkResource>(bookmarkResourceList);
+    }
+
+    @Autowired
+    BookmarkRestController(BookmarkRepository bookmarkRepository,
+                           AccountRepository accountRepository) {
+        this.bookmarkRepository = bookmarkRepository;
+        this.accountRepository = accountRepository;
+    }
+}
+
+
+```
+
+
+<!--- todo show some output-->
+
+##   Error Handling
+<!-- todo 
+ 	 talk about vndErrors 
+ 	 talk about sending about useful response 
+ 	 talk about status codes through @ControllerAdvice 
+-->
+
+
+
+## Securing a REST Service   
+
+Thus far we've proceeded from the assumption that all clients are trustworthy, and that they should have unmitigated access to all the data. This is rarely actually the case. An open REST API is an insecure one. It's not hard to fix that, though. [Spring Security](http://spring.io/projects/spring-security) provides primitives for securing application access. Fundamentally, Spring Security needs to have some idea of your application's users and their privileges. These privileges, or *authorities*, answer the question: what may an application user see,  or do?  
+
+At the heart of Spring Security is the `UserDetailsService` interface, which has *one job*: given a username, produce a `UserDetails` implementation,  `UserDetails` implementations must be able to answer questions about an accounts validity, its password, its username, and its authorities (represented by instances of type `org.springframework.security.core.GrantedAuthority`).
+
+
+```
+package org.springframework.security.core.userdetails;
+
+public interface UserDetailsService {
+
+    org.springframework.security.core.userdetails.UserDetails loadUserByUsername(java.lang.String s) 
+        throws org.springframework.security.core.userdetails.UsernameNotFoundException;
+        
+}
+```
+
+Spring Security provides many implementations of this contract that adapt  existing identity providers, like Active Directory, LDAP, `pam`, CAAS, etc. [Spring Social](http://spring.io/projects/spring-social) provides an integration with  different OAuth-based services like Facebook, Twitter, etc.  
+
+Our example already has a notion of an `Account`, so we can simply adapt that by providing our own `UserDetailsService` implementation, as shown below in a `@Configuration`-class `WebSecurityConfiguration`. Spring Security will ask this `UserDetailsService`  if it has any questions about an authentication request.
+
+To consume our REST service, we must be authenticated. There are a few ways to approach this. You can use HTTP basic. <!-- You can use X-Auth.  -->
+
  
- 
+```
+package bookmarks;
+
+import org.apache.coyote.http11.Http11NioProtocol;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.beans.factory.annotation.Value;
+import org.springframework.boot.CommandLineRunner;
+import org.springframework.boot.SpringApplication;
+import org.springframework.boot.autoconfigure.EnableAutoConfiguration;
+import org.springframework.boot.context.embedded.ConfigurableEmbeddedServletContainer;
+import org.springframework.boot.context.embedded.EmbeddedServletContainerCustomizer;
+import org.springframework.boot.context.embedded.FilterRegistrationBean;
+import org.springframework.boot.context.embedded.tomcat.TomcatEmbeddedServletContainerFactory;
+import org.springframework.context.annotation.Bean;
+import org.springframework.context.annotation.ComponentScan;
+import org.springframework.context.annotation.Configuration;
+import org.springframework.context.annotation.Profile;
+import org.springframework.core.io.Resource;
+import org.springframework.hateoas.Link;
+import org.springframework.hateoas.ResourceSupport;
+import org.springframework.hateoas.Resources;
+import org.springframework.http.HttpHeaders;
+import org.springframework.http.HttpStatus;
+import org.springframework.http.ResponseEntity;
+import org.springframework.security.authentication.AuthenticationManager;
+import org.springframework.security.config.annotation.authentication.builders.AuthenticationManagerBuilder;
+import org.springframework.security.config.annotation.authentication.configurers.GlobalAuthenticationConfigurerAdapter;
+import org.springframework.security.core.authority.AuthorityUtils;
+import org.springframework.security.core.userdetails.User;
+import org.springframework.security.core.userdetails.UserDetailsService;
+import org.springframework.security.core.userdetails.UsernameNotFoundException;
+import org.springframework.security.oauth2.config.annotation.configurers.ClientDetailsServiceConfigurer;
+import org.springframework.security.oauth2.config.annotation.web.configuration.AuthorizationServerConfigurerAdapter;
+import org.springframework.security.oauth2.config.annotation.web.configuration.EnableAuthorizationServer;
+import org.springframework.security.oauth2.config.annotation.web.configuration.EnableResourceServer;
+import org.springframework.security.oauth2.config.annotation.web.configurers.AuthorizationServerEndpointsConfigurer;
+import org.springframework.web.bind.annotation.*;
+
+import javax.servlet.*;
+import javax.servlet.http.HttpServletRequest;
+import javax.servlet.http.HttpServletResponse;
+import java.io.IOException;
+import java.net.URI;
+import java.util.Arrays;
+import java.util.List;
+import java.util.stream.Collectors;
+
+import static org.springframework.hateoas.mvc.ControllerLinkBuilder.linkTo;
+import static org.springframework.hateoas.mvc.ControllerLinkBuilder.methodOn;
+
+@Configuration
+@ComponentScan
+@EnableAutoConfiguration
+public class Application { 
+    @Bean
+    CommandLineRunner init(AccountRepository accountRepository, BookmarkRepository bookmarkRepository) {
+        return (evt) ->
+                Arrays.asList("jhoeller", "dsyer", "pwebb", "ogierke", "rwinch", "mfisher", "mpollack").forEach(a -> {
+                    Account account = accountRepository.save(new Account(a, "password"));
+                    bookmarkRepository.save(new Bookmark(account, "http://bookmark.com/1/" + a, "A description"));
+                    bookmarkRepository.save(new Bookmark(account, "http://bookmark.com/2/" + a, "A description"));
+                });
+    }
+
+    public static void main(String[] args) {
+        SpringApplication.run(Application.class, args);
+    }
+}
 
 
+@Configuration
+class WebSecurityConfiguration extends GlobalAuthenticationConfigurerAdapter {
 
-## Securing a REST Service with OAuth 
+    @Autowired
+    AccountRepository accountRepository;
+
+    @Override
+    public void init(AuthenticationManagerBuilder auth) throws Exception {
+        UserDetailsService userDetailsService = (username) -> {
+            Account a = accountRepository.findByUsername(username);
+            if (null != a) {
+                return new User(a.username, a.password,
+                        true, true, true, true, AuthorityUtils.createAuthorityList("USER", "write"));
+            } else {
+                throw new UsernameNotFoundException("couldn't find the user " + username);
+            }
+        };
+        auth.userDetailsService(userDetailsService);
+    }
+}
+
+
+@Configuration
+@EnableResourceServer
+@EnableAuthorizationServer
+class OAuth2Configuration extends AuthorizationServerConfigurerAdapter {
+
+    String applicationName = "bookmarks";
+
+    // This is required for password grants, which we specify below as one of the  {@literal authorizedGrantTypes()}.
+    @Autowired
+    AuthenticationManager authenticationManager;
+
+    @Override
+    public void configure(AuthorizationServerEndpointsConfigurer endpoints) throws Exception {
+        endpoints.authenticationManager(authenticationManager);
+    }
+
+    @Override
+    public void configure(ClientDetailsServiceConfigurer clients) throws Exception {
+        clients.inMemory()
+                .withClient("android-" + applicationName)
+                .authorizedGrantTypes("password", "authorization_code", "refresh_token")
+                .authorities("ROLE_USER")
+                .scopes("write")
+                .resourceIds(applicationName)
+                .secret("123456");
+    }
+}
+
+class BookmarkResource extends ResourceSupport {
+
+    private final Bookmark bookmark;
+
+    public BookmarkResource(Bookmark bookmark) {
+        String username = bookmark.account.username;
+        this.bookmark = bookmark;
+        this.add(new Link(bookmark.uri, "bookmark-uri"));
+        this.add(linkTo(BookmarkRestController.class, username).withRel("bookmarks"));
+        this.add(linkTo(methodOn(BookmarkRestController.class, username).readBookmark(username, bookmark.id)).withSelfRel());
+    }
+
+    public Bookmark getBookmark() {
+        return bookmark;
+    }
+}
+
+@RestController
+@RequestMapping("/{userId}/bookmarks")
+class BookmarkRestController {
+
+    private final BookmarkRepository bookmarkRepository;
+
+    private final AccountRepository accountRepository;
+
+    @RequestMapping(method = RequestMethod.POST)
+    ResponseEntity<?> add(@PathVariable String userId,
+                          @RequestBody Bookmark input) {
+
+        Account account = accountRepository.findByUsername(userId);
+
+        Bookmark bookmark = bookmarkRepository.save(
+                new Bookmark(account, input.uri, input.description));
+
+        HttpHeaders httpHeaders = new HttpHeaders();
+
+        Link forOneBookmark = new BookmarkResource(bookmark).getLink("self");
+        httpHeaders.setLocation(URI.create(forOneBookmark.getHref()));
+
+        return new ResponseEntity<>(null, httpHeaders, HttpStatus.CREATED);
+    }
+
+    @RequestMapping(value = "/{bookmarkId}", method = RequestMethod.GET)
+    BookmarkResource readBookmark(@PathVariable String userId, @PathVariable Long bookmarkId) {
+        return new BookmarkResource(this.bookmarkRepository.findOne(bookmarkId));
+    }
+
+    @RequestMapping(method = RequestMethod.GET)
+    Resources<BookmarkResource> readBookmarks(@PathVariable String userId) {
+        List<BookmarkResource> bookmarkResourceList =
+                bookmarkRepository.findByAccountUsername(userId).stream()
+                        .map(BookmarkResource::new).collect(Collectors.toList());
+        return new Resources<BookmarkResource>(bookmarkResourceList);
+    }
+
+    @Autowired
+    BookmarkRestController(BookmarkRepository bookmarkRepository,
+                           AccountRepository accountRepository) {
+        this.bookmarkRepository = bookmarkRepository;
+        this.accountRepository = accountRepository;
+    }
+}
+
+```
+
+
 TODO: talk about storing Access Tokens in a single store that multiple client nodes use for federated ID in mind. Then show how you can use Spring Boot's autoconfiguration approach to share across an organization's services w/ no configuration apart from `@EnableAutoConfiguration`. Show an example of Spring Security OAuth persiting to Redis or something more horizontally scalable than a SQL DB.   
 
 

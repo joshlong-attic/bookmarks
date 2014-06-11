@@ -15,6 +15,7 @@ import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
+import java.net.URI;
 import java.util.Arrays;
 import java.util.List;
 import java.util.stream.Collectors;
@@ -72,10 +73,15 @@ class BookmarkRestController {
                           @RequestBody Bookmark input) {
 
         Account account = accountRepository.findByUsername(userId);
-        Bookmark bookmark = bookmarkRepository.save(new Bookmark(account, input.uri, input.description));
+
+        Bookmark bookmark = bookmarkRepository.save(
+                new Bookmark(account, input.uri, input.description));
 
         HttpHeaders httpHeaders = new HttpHeaders();
-        httpHeaders.setLocation(linkTo(methodOn(BookmarkRestController.class, account.username).readBookmark(account.username, bookmark.id)).toUri());
+
+        Link forOneBookmark = new BookmarkResource(bookmark).getLink("self");
+        httpHeaders.setLocation(URI.create(forOneBookmark.getHref()));
+
         return new ResponseEntity<>(null, httpHeaders, HttpStatus.CREATED);
     }
 
@@ -93,7 +99,8 @@ class BookmarkRestController {
     }
 
     @Autowired
-    BookmarkRestController(BookmarkRepository bookmarkRepository, AccountRepository accountRepository) {
+    BookmarkRestController(BookmarkRepository bookmarkRepository,
+                           AccountRepository accountRepository) {
         this.bookmarkRepository = bookmarkRepository;
         this.accountRepository = accountRepository;
     }
