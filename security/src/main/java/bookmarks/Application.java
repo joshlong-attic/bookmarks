@@ -138,15 +138,10 @@ class WebSecurityConfiguration extends GlobalAuthenticationConfigurerAdapter {
 
     @Override
     public void init(AuthenticationManagerBuilder auth) throws Exception {
-        UserDetailsService userDetailsService = (username) -> {
-            Account a = accountRepository.findByUsername(username);
-            if (null != a) {
-                return new User(a.username, a.password,
-                        true, true, true, true, AuthorityUtils.createAuthorityList("USER", "write"));
-            } else {
-                throw new UsernameNotFoundException("couldn't find the user " + username);
-            }
-        };
+        UserDetailsService userDetailsService = (username) ->
+            accountRepository.findByUsername(username)
+                .map(a -> new User(a.username, a.password, true, true, true, true, AuthorityUtils.createAuthorityList("USER", "write")))
+                .orElseThrow(() -> new UsernameNotFoundException("could not find the user '" + username + "'"));
         auth.userDetailsService(userDetailsService);
     }
 }
@@ -207,19 +202,20 @@ class BookmarkRestController {
     private final AccountRepository accountRepository;
 
     @RequestMapping(method = RequestMethod.POST)
-    ResponseEntity<?> add(Principal principal,
-                          @RequestBody Bookmark input) {
+    ResponseEntity<?> add(@PathVariable String userId, @RequestBody Bookmark input) {
+        return accountRepository.findByUsername(userId)
+                .map(account -> {
+                            Bookmark bookmark = bookmarkRepository.save(new Bookmark(account, input.uri, input.description));
 
-        Account account = accountRepository.findByUsername(principal.getName());
-        Bookmark bookmark = bookmarkRepository.save(
-                new Bookmark(account, input.uri, input.description));
+                            HttpHeaders httpHeaders = new HttpHeaders();
 
-        Link forOneBookmark = new BookmarkResource(bookmark).getLink("self");
+                            Link forOneBookmark = new BookmarkResource(bookmark).getLink("self");
+                            httpHeaders.setLocation(URI.create(forOneBookmark.getHref()));
 
-        HttpHeaders httpHeaders = new HttpHeaders();
-        httpHeaders.setLocation(URI.create(forOneBookmark.getHref()));
+                            return new ResponseEntity<>(null, httpHeaders, HttpStatus.CREATED);
+                        }
+                ).orElseThrow(() -> new RuntimeException("could not find the user '" + userId + "'"));
 
-        return new ResponseEntity<>(null, httpHeaders, HttpStatus.CREATED);
     }
 
     @RequestMapping(value = "/{bookmarkId}", method = RequestMethod.GET)

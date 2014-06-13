@@ -121,14 +121,14 @@ One repository will manage our `Account` entities, called `AccountRepository`, s
 ```
 package bookmarks;
 
-import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.data.jpa.repository.JpaRepository; 
+
+import java.util.Optional;
 
 public interface AccountRepository extends JpaRepository<Account, Long> {
-    Account findByUsername(String username);
+    Optional<Account> findByUsername(String username);
 }
 ```
-
- 
 
 Here's the repository for working with `Bookmark` entities.
 
@@ -229,6 +229,8 @@ import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
+import org.springframework.web.multipart.MultipartFile;
+import org.springframework.web.multipart.MultipartResolver;
 import org.springframework.web.servlet.support.ServletUriComponentsBuilder;
 
 import java.security.Principal;
@@ -263,22 +265,23 @@ public class Application {
 class BookmarkRestController {
 
     private final BookmarkRepository bookmarkRepository;
-
     private final AccountRepository accountRepository;
 
 
     @RequestMapping(method = RequestMethod.POST)
-    ResponseEntity<?> add(@PathVariable String userId,
-                          @RequestBody Bookmark input) {
+    ResponseEntity<?> add(@PathVariable String userId, @RequestBody Bookmark input) {
+        return accountRepository.findByUsername(userId).map(
+                account -> {
+                    Bookmark result = bookmarkRepository.save(new Bookmark(account, input.uri, input.description));
 
-        Account account = accountRepository.findByUsername(userId);
-        Bookmark result = bookmarkRepository.save(new Bookmark(account, input.uri, input.description));
+                    HttpHeaders httpHeaders = new HttpHeaders();
+                    httpHeaders.setLocation(ServletUriComponentsBuilder.fromCurrentRequest().path("/{id}")
+                            .buildAndExpand(result.id)
+                            .toUri());
+                    return new ResponseEntity<>(null, httpHeaders, HttpStatus.CREATED);
+                }
+        ).orElseThrow(() -> new RuntimeException("could not find the user '" + userId + "'"));
 
-        HttpHeaders httpHeaders = new HttpHeaders();
-        httpHeaders.setLocation(ServletUriComponentsBuilder.fromCurrentRequest().path("/{id}")
-                .buildAndExpand(result.id)
-                .toUri());
-        return new ResponseEntity<>(null, httpHeaders, HttpStatus.CREATED);
     }
 
     @RequestMapping(value = "/{bookmarkId}", method = RequestMethod.GET)
@@ -429,20 +432,20 @@ class BookmarkRestController {
     private final AccountRepository accountRepository;
 
     @RequestMapping(method = RequestMethod.POST)
-    ResponseEntity<?> add(@PathVariable String userId,
-                          @RequestBody Bookmark input) {
+    ResponseEntity<?> add(@PathVariable String userId, @RequestBody Bookmark input) {
+        return accountRepository.findByUsername(userId)
+            .map(account -> {
+                Bookmark bookmark = bookmarkRepository.save(new Bookmark(account, input.uri, input.description));
 
-        Account account = accountRepository.findByUsername(userId);
+                HttpHeaders httpHeaders = new HttpHeaders();
 
-        Bookmark bookmark = bookmarkRepository.save(
-                new Bookmark(account, input.uri, input.description));
+                Link forOneBookmark = new BookmarkResource(bookmark).getLink("self");
+                httpHeaders.setLocation(URI.create(forOneBookmark.getHref()));
 
-        HttpHeaders httpHeaders = new HttpHeaders();
+                return new ResponseEntity<>(null, httpHeaders, HttpStatus.CREATED);
+            }
+        ).orElseThrow(() -> new RuntimeException("could not find the user '" + userId + "'"));
 
-        Link forOneBookmark = new BookmarkResource(bookmark).getLink("self");
-        httpHeaders.setLocation(URI.create(forOneBookmark.getHref()));
-
-        return new ResponseEntity<>(null, httpHeaders, HttpStatus.CREATED);
     }
 
     @RequestMapping(value = "/{bookmarkId}", method = RequestMethod.GET)
@@ -466,7 +469,6 @@ class BookmarkRestController {
     }
 }
 
-
 ```
 
 
@@ -485,7 +487,7 @@ class BookmarkRestController {
 
 Thus far we've proceeded from the assumption that all clients are trustworthy, and that they should have unmitigated access to all the data. This is rarely actually the case. An open REST API is an insecure one. It's not hard to fix that, though. [Spring Security](http://spring.io/projects/spring-security) provides primitives for securing application access. Fundamentally, Spring Security needs to have some idea of your application's users and their privileges. These privileges, or *authorities*, answer the question: what may an application user see,  or do?  
 
-At the heart of Spring Security is the `UserDetailsService` interface, which has *one job*: given a username, produce a `UserDetails` implementation,  `UserDetails` implementations must be able to answer questions about an accounts validity, its password, its username, and its authorities (represented by instances of type `org.springframework.security.core.GrantedAuthority`).
+At the heart of Spring Security is the `UserDetailsService` interface, which has *one job*: given a username, produce a `UserDetails` implementation,  `UserDetails` implementations must be able to answer questions about an account's validity, its password, its username, and its authorities (represented by instances of type `org.springframework.security.core.GrantedAuthority`). 
 
 
 ```
@@ -499,7 +501,7 @@ public interface UserDetailsService {
 }
 ```
 
-Spring Security provides many implementations of this contract that adapt  existing identity providers, like Active Directory, LDAP, `pam`, CAAS, etc. [Spring Social](http://spring.io/projects/spring-social) provides an integration with  different OAuth-based services like Facebook, Twitter, etc.  
+Spring Security provides many implementations of this contract that adapt  existing identity providers, like Active Directory, LDAP, `pam`, CAAS, etc. [Spring Social](http://spring.io/projects/spring-social) provides an integration with  different OAuth-based services like Facebook, Twitter, etc.  Spring Security then provides integrations which make it easy to use a `UserDetailsService` implementation as required in the right environments. 
 
 Our example already has a notion of an `Account`, so we can simply adapt that by providing our own `UserDetailsService` implementation, as shown below in a `@Configuration`-class `WebSecurityConfiguration`. Spring Security will ask this `UserDetailsService`  if it has any questions about an authentication request.
 
@@ -549,6 +551,7 @@ import javax.servlet.http.HttpServletRequest;
 import javax.servlet.http.HttpServletResponse;
 import java.io.IOException;
 import java.net.URI;
+import java.security.Principal;
 import java.util.Arrays;
 import java.util.List;
 import java.util.stream.Collectors;
@@ -556,10 +559,72 @@ import java.util.stream.Collectors;
 import static org.springframework.hateoas.mvc.ControllerLinkBuilder.linkTo;
 import static org.springframework.hateoas.mvc.ControllerLinkBuilder.methodOn;
 
+//
+// curl -X POST -vu android-bookmarks:123456 http://localhost:8080/oauth/token -H "Accept: application/json" -d "password=password&username=jlong&grant_type=password&scope=write&client_secret=123456&client_id=android-bookmarks"
+// curl -v POST http://127.0.0.1:8080/tags --data "tags=cows,dogs"  -H "Authorization: Bearer 66953496-fc5b-44d0-9210-b0521863ffcb"
+
 @Configuration
 @ComponentScan
 @EnableAutoConfiguration
-public class Application { 
+public class Application {
+
+    // CORS
+    @Bean
+    FilterRegistrationBean corsFilter(@Value("${tagit.origin:}") String origin) {
+        return new FilterRegistrationBean(new Filter() {
+            public void doFilter(ServletRequest req, ServletResponse res, FilterChain chain)
+                    throws IOException, ServletException {
+                HttpServletRequest request = (HttpServletRequest) req;
+                HttpServletResponse response = (HttpServletResponse) res;
+                String method = request.getMethod();
+                response.setHeader("Access-Control-Allow-Origin", "http://localhost:9000");
+                response.setHeader("Access-Control-Allow-Methods", "POST,GET,OPTIONS,DELETE");
+                response.setHeader("Access-Control-Max-Age", Long.toString(60 * 60));
+                response.setHeader("Access-Control-Allow-Credentials", "true");
+                response.setHeader("Access-Control-Allow-Headers", "Origin,Accept,X-Requested-With,Content-Type,Access-Control-Request-Method,Access-Control-Request-Headers,Authorization");
+                if ("OPTIONS".equals(method)) {
+                    response.setStatus(HttpStatus.OK.value());
+                } else {
+                    chain.doFilter(req, res);
+                }
+            }
+
+            public void init(FilterConfig filterConfig) {
+            }
+
+            public void destroy() {
+            }
+        });
+    }
+
+    // expose HTTPS
+    @Profile("ssl")
+    @Bean
+    EmbeddedServletContainerCustomizer containerCustomizer(@Value("${keystore.file}") Resource keystoreFile,
+                                                           @Value("${keystore.pass}") String keystorePass) throws Exception {
+
+        String absoluteKeystoreFile = keystoreFile.getFile().getAbsolutePath();
+        return (ConfigurableEmbeddedServletContainer container) -> {
+            if (container instanceof TomcatEmbeddedServletContainerFactory) {
+                TomcatEmbeddedServletContainerFactory tomcat = (TomcatEmbeddedServletContainerFactory) container;
+                tomcat.addConnectorCustomizers(
+                        (connector) -> {
+                            connector.setPort(8443);
+                            connector.setSecure(true);
+                            connector.setScheme("https");
+                            Http11NioProtocol proto = (Http11NioProtocol) connector.getProtocolHandler();
+                            proto.setSSLEnabled(true);
+                            proto.setKeystoreFile(absoluteKeystoreFile);
+                            proto.setKeystorePass(keystorePass);
+                            proto.setKeystoreType("PKCS12");
+                            proto.setKeyAlias("tomcat");
+                        }
+                );
+            }
+        };
+    }
+
+
     @Bean
     CommandLineRunner init(AccountRepository accountRepository, BookmarkRepository bookmarkRepository) {
         return (evt) ->
@@ -584,15 +649,10 @@ class WebSecurityConfiguration extends GlobalAuthenticationConfigurerAdapter {
 
     @Override
     public void init(AuthenticationManagerBuilder auth) throws Exception {
-        UserDetailsService userDetailsService = (username) -> {
-            Account a = accountRepository.findByUsername(username);
-            if (null != a) {
-                return new User(a.username, a.password,
-                        true, true, true, true, AuthorityUtils.createAuthorityList("USER", "write"));
-            } else {
-                throw new UsernameNotFoundException("couldn't find the user " + username);
-            }
-        };
+        UserDetailsService userDetailsService = (username) ->
+            accountRepository.findByUsername(username)
+                .map(a -> new User(a.username, a.password, true, true, true, true, AuthorityUtils.createAuthorityList("USER", "write")))
+                .orElseThrow(() -> new UsernameNotFoundException("could not find the user '" + username + "'"));
         auth.userDetailsService(userDetailsService);
     }
 }
@@ -626,6 +686,7 @@ class OAuth2Configuration extends AuthorizationServerConfigurerAdapter {
     }
 }
 
+
 class BookmarkResource extends ResourceSupport {
 
     private final Bookmark bookmark;
@@ -635,7 +696,7 @@ class BookmarkResource extends ResourceSupport {
         this.bookmark = bookmark;
         this.add(new Link(bookmark.uri, "bookmark-uri"));
         this.add(linkTo(BookmarkRestController.class, username).withRel("bookmarks"));
-        this.add(linkTo(methodOn(BookmarkRestController.class, username).readBookmark(username, bookmark.id)).withSelfRel());
+        this.add(linkTo(methodOn(BookmarkRestController.class, username).readBookmark(null, bookmark.id)).withSelfRel());
     }
 
     public Bookmark getBookmark() {
@@ -644,7 +705,7 @@ class BookmarkResource extends ResourceSupport {
 }
 
 @RestController
-@RequestMapping("/{userId}/bookmarks")
+@RequestMapping("/bookmarks")
 class BookmarkRestController {
 
     private final BookmarkRepository bookmarkRepository;
@@ -652,38 +713,38 @@ class BookmarkRestController {
     private final AccountRepository accountRepository;
 
     @RequestMapping(method = RequestMethod.POST)
-    ResponseEntity<?> add(@PathVariable String userId,
-                          @RequestBody Bookmark input) {
+    ResponseEntity<?> add(@PathVariable String userId, @RequestBody Bookmark input) {
+        return accountRepository.findByUsername(userId)
+                .map(account -> {
+                            Bookmark bookmark = bookmarkRepository.save(new Bookmark(account, input.uri, input.description));
 
-        Account account = accountRepository.findByUsername(userId);
+                            HttpHeaders httpHeaders = new HttpHeaders();
 
-        Bookmark bookmark = bookmarkRepository.save(
-                new Bookmark(account, input.uri, input.description));
+                            Link forOneBookmark = new BookmarkResource(bookmark).getLink("self");
+                            httpHeaders.setLocation(URI.create(forOneBookmark.getHref()));
 
-        HttpHeaders httpHeaders = new HttpHeaders();
+                            return new ResponseEntity<>(null, httpHeaders, HttpStatus.CREATED);
+                        }
+                ).orElseThrow(() -> new RuntimeException("could not find the user '" + userId + "'"));
 
-        Link forOneBookmark = new BookmarkResource(bookmark).getLink("self");
-        httpHeaders.setLocation(URI.create(forOneBookmark.getHref()));
-
-        return new ResponseEntity<>(null, httpHeaders, HttpStatus.CREATED);
     }
 
     @RequestMapping(value = "/{bookmarkId}", method = RequestMethod.GET)
-    BookmarkResource readBookmark(@PathVariable String userId, @PathVariable Long bookmarkId) {
+    BookmarkResource readBookmark(Principal principal,
+                                  @PathVariable Long bookmarkId) {
         return new BookmarkResource(this.bookmarkRepository.findOne(bookmarkId));
     }
 
     @RequestMapping(method = RequestMethod.GET)
-    Resources<BookmarkResource> readBookmarks(@PathVariable String userId) {
+    Resources<BookmarkResource> readBookmarks(Principal principal) {
         List<BookmarkResource> bookmarkResourceList =
-                bookmarkRepository.findByAccountUsername(userId).stream()
+                bookmarkRepository.findByAccountUsername(principal.getName()).stream()
                         .map(BookmarkResource::new).collect(Collectors.toList());
         return new Resources<BookmarkResource>(bookmarkResourceList);
     }
 
     @Autowired
-    BookmarkRestController(BookmarkRepository bookmarkRepository,
-                           AccountRepository accountRepository) {
+    BookmarkRestController(BookmarkRepository bookmarkRepository, AccountRepository accountRepository) {
         this.bookmarkRepository = bookmarkRepository;
         this.accountRepository = accountRepository;
     }

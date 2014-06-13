@@ -53,17 +53,19 @@ class BookmarkRestController {
 
 
     @RequestMapping(method = RequestMethod.POST)
-    ResponseEntity<?> add(@PathVariable String userId,
-                          @RequestBody Bookmark input) {
+    ResponseEntity<?> add(@PathVariable String userId, @RequestBody Bookmark input) {
+        return accountRepository.findByUsername(userId).map(
+                account -> {
+                    Bookmark result = bookmarkRepository.save(new Bookmark(account, input.uri, input.description));
 
-        Account account = accountRepository.findByUsername(userId);
-        Bookmark result = bookmarkRepository.save(new Bookmark(account, input.uri, input.description));
+                    HttpHeaders httpHeaders = new HttpHeaders();
+                    httpHeaders.setLocation(ServletUriComponentsBuilder.fromCurrentRequest().path("/{id}")
+                            .buildAndExpand(result.id)
+                            .toUri());
+                    return new ResponseEntity<>(null, httpHeaders, HttpStatus.CREATED);
+                }
+        ).orElseThrow(() -> new RuntimeException("could not find the user '" + userId + "'"));
 
-        HttpHeaders httpHeaders = new HttpHeaders();
-        httpHeaders.setLocation(ServletUriComponentsBuilder.fromCurrentRequest().path("/{id}")
-                .buildAndExpand(result.id)
-                .toUri());
-        return new ResponseEntity<>(null, httpHeaders, HttpStatus.CREATED);
     }
 
     @RequestMapping(value = "/{bookmarkId}", method = RequestMethod.GET)
