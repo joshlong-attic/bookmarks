@@ -501,13 +501,37 @@ public interface UserDetailsService {
 }
 ```
 
-Spring Security provides many implementations of this contract that adapt  existing identity providers, like Active Directory, LDAP, `pam`, CAAS, etc. [Spring Social](http://spring.io/projects/spring-social) provides an integration with  different OAuth-based services like Facebook, Twitter, etc.  Spring Security then provides integrations which make it easy to use a `UserDetailsService` implementation as required in the right environments. 
-
-Our example already has a notion of an `Account`, so we can simply adapt that by providing our own `UserDetailsService` implementation, as shown below in a `@Configuration`-class `WebSecurityConfiguration`. Spring Security will ask this `UserDetailsService`  if it has any questions about an authentication request.
-
-To consume our REST service, we must be authenticated. There are a few ways to approach this. You can use HTTP basic. <!-- You can use X-Auth.  -->
-
+Spring Security provides many implementations of this contract that adapt  existing identity providers, like Active Directory, LDAP, `pam`, CAAS, etc. [Spring Social](http://spring.io/projects/spring-social) even provides a nice integration that delegates to    different OAuth-based services like Facebook, Twitter, etc., for authentication.  
  
+Our example already has a notion of an `Account`, so we can simply adapt that by providing our own `UserDetailsService` implementation, as shown below in the `WebSecurityConfiguration` `@Configuration`-class . Spring Security will ask this `UserDetailsService`  if it has any questions about an authentication request. 
+
+### Client Authentication and Authorization on the Open Web with Spring Security  OAuth 
+We can authenticate client requests in a myriad of ways. Clients could send, for example, an HTTP-basic username  and password on each request. They could transmit an x509 certificate on each request. There are indeed numerous approaches that could be used here, with numerous tradeoffs.  
+
+Our API is meant to be consumed over the open-web. It's meant to be used by all manner of HTML5 and native mobile and desktop clients that we intend to build. We shall use  diverse clients with diverse security capabilities, and any solution we pick should be able to accomodate that. We should also decouple the user's username and password from the application's session. After all, if I reset my Twitter password, I don't want to be forced to re-authenticate every client signed in. On the other hand, if someone *does* hijack one of our clients (perhaps a user has lost a  phone), we don't want the party that stole the device to be able to lock our users out of their accounts. 
+ 
+OAuth provides a clean way to handle these concerns.  You've no doubt used OAuth already. One common case is when installing a Facebook plugin or game. Typically the flow looks like this: 
+
+* user finds a game or piece of functionality on the wbe that requires access to a user's Facebook data in order to function. One common example is "Sign in With Facebook"-style scenarios.
+* a user clicks "install," or "add," and is then redirected to Facebook.com where the user is prompted to grant certain permissions (like "Post to wall," or "Read Basic information") 
+* the user confirms these permissions and is subsequently redirected back to the source application where the source application now has an access token. It will use this access token to make requests  to Facebook on your behalf.  
+
+In this example, any old client can talk to Facebook and the client has, at the end of the process, an access token. This access token is transmitted via all subsequent REST requests, sort of like an HTTP cookie. The username and password need not be retransmitted and the client may cache the access token for a finite or infinite period. Users of the client need not re-authenticate every time they open an application, for example. Even better: access tokens are specific to each client. They may be used to signal that one client needs more permissoins than others.  In the flow above, requests always ended up at Facebook.com where - if the user is not already signed into Facebook, he or she will be pompted to login and then assign permissions to the client. This has the benefit of ensuring that any sensitive information, like a username and password, is never entered in the wild in untrusted applications that might maliciously try to capture that username and password. Our application, will not be available to any old client. We can be sure that any client we deploy is *friendly*, as it will be one of *our* clients. OAuth supports a simpler flow whereby a user authenticates (typically by sending a username and password) from the client and the service returns an OAuth access token directly, sidestepping the need for a redirect to a trusted domain. This is the approach we will take: the reuslt will be that our clients will have an access token that's decoupled from the user's username and password, and the access token can be used to confer different levels of security on different clients.  
+
+Setting up OAuth security for our application is easy.  The `OAuth2Configuration` configuration class describes one client (here, one for a hypothetical Android client) that needs the `ROLE_USER` and the `write` scope.  Spring Security OAuth will read this information from the `AuthenticationManager` that is ultimately configured using our custom `UserDetailsService` implementation. 
+
+OAuth is very flexible. You could, for example, deploy an authorization server that's share by many REST APIs. In this case, our OAuth implementation lives adjacent to our bookmarks REST API. They are one and the same. This is why we've used both `@EnableResourceServer` and `@EnableAuthorizationServer` in the same configuration class. 
+
+### You Said Something about the Open Web? 
+We expect that some of the clients to our service will be HTML5-based. They will want to talk to our REST API from different domains, and in most browsers this runs afoul of cross-site-scripting security measures. We can explicitly enable XSS for well-known clients by exposing CORS (cross-origin request scripting) headers. These headers, when present in the service responses, signal to the browser that requests of the origin, shape and configuration described in the headers *are* permitted, even across domains. Our API is decorated with a simple `javax.servlet.Filter` that adds these headers on every request. In the example, we're delegating to a property - `tagit.origin` - if provided or a default of `http://localhost:9000` where we might have, for example, a JavaScript client making requests to the service. We could just as easily read this information from a datastore which we can change without recompiling the code. We've only specified a single origin here, but we could just as easily specified numerous clients.  
+
+### Using HTTPS (SSL/TLS) to prevent Man-in-the-Middle Attacks
+Spring Boot provides an embedded web server (Apache Tomcat, by default) that can be configured programmatically to do anything that the standalone Apache Tomcat webserver can do.  To configure HTTPS (SSL/TLS), you need only register a `org.springframework.boot.context.embedded.EmbeddedServletContainerCustomizer` bean. Our bean simply wires up the Apache Tomcat connector to support HTTPS (SSL or TLS-encrypted) traffic. HTTPS requires a signed certificate certificate and a certificate password which we provide using property values. Note that, to support ease of configuration, this bean's only available using the Spring profile `https`. 
+
+### Putting it All Together 
+
+<!-- show how to gen the certificate, make OAuth requests from CURL, etc. -->
+  
 ```
 package bookmarks;
 
@@ -559,25 +583,22 @@ import java.util.stream.Collectors;
 import static org.springframework.hateoas.mvc.ControllerLinkBuilder.linkTo;
 import static org.springframework.hateoas.mvc.ControllerLinkBuilder.methodOn;
 
-//
-// curl -X POST -vu android-bookmarks:123456 http://localhost:8080/oauth/token -H "Accept: application/json" -d "password=password&username=jlong&grant_type=password&scope=write&client_secret=123456&client_id=android-bookmarks"
-// curl -v POST http://127.0.0.1:8080/tags --data "tags=cows,dogs"  -H "Authorization: Bearer 66953496-fc5b-44d0-9210-b0521863ffcb"
-
 @Configuration
 @ComponentScan
 @EnableAutoConfiguration
 public class Application {
-
+	
     // CORS
     @Bean
-    FilterRegistrationBean corsFilter(@Value("${tagit.origin:}") String origin) {
+    FilterRegistrationBean corsFilter(@Value("${tagit.origin:http://localhost:9000}") String origin) {
         return new FilterRegistrationBean(new Filter() {
             public void doFilter(ServletRequest req, ServletResponse res, FilterChain chain)
                     throws IOException, ServletException {
                 HttpServletRequest request = (HttpServletRequest) req;
                 HttpServletResponse response = (HttpServletResponse) res;
                 String method = request.getMethod();
-                response.setHeader("Access-Control-Allow-Origin", "http://localhost:9000");
+                // this value could just as easily have come from a database
+                response.setHeader("Access-Control-Allow-Origin", origin);
                 response.setHeader("Access-Control-Allow-Methods", "POST,GET,OPTIONS,DELETE");
                 response.setHeader("Access-Control-Max-Age", Long.toString(60 * 60));
                 response.setHeader("Access-Control-Allow-Credentials", "true");
@@ -598,10 +619,10 @@ public class Application {
     }
 
     // expose HTTPS
-    @Profile("ssl")
+    @Profile("https")
     @Bean
-    EmbeddedServletContainerCustomizer containerCustomizer(@Value("${keystore.file}") Resource keystoreFile,
-                                                           @Value("${keystore.pass}") String keystorePass) throws Exception {
+    EmbeddedServletContainerCustomizer https(@Value("${keystore.file}") Resource keystoreFile,
+										      @Value("${keystore.pass}") String keystorePass) throws Exception {
 
         String absoluteKeystoreFile = keystoreFile.getFile().getAbsolutePath();
         return (ConfigurableEmbeddedServletContainer container) -> {
@@ -623,7 +644,6 @@ public class Application {
             }
         };
     }
-
 
     @Bean
     CommandLineRunner init(AccountRepository accountRepository, BookmarkRepository bookmarkRepository) {
@@ -650,9 +670,9 @@ class WebSecurityConfiguration extends GlobalAuthenticationConfigurerAdapter {
     @Override
     public void init(AuthenticationManagerBuilder auth) throws Exception {
         UserDetailsService userDetailsService = (username) ->
-            accountRepository.findByUsername(username)
-                .map(a -> new User(a.username, a.password, true, true, true, true, AuthorityUtils.createAuthorityList("USER", "write")))
-                .orElseThrow(() -> new UsernameNotFoundException("could not find the user '" + username + "'"));
+                accountRepository.findByUsername(username)
+                        .map(a -> new User(a.username, a.password, true, true, true, true, AuthorityUtils.createAuthorityList("USER", "write")))
+                        .orElseThrow(() -> new UsernameNotFoundException("could not find the user '" + username + "'"));
         auth.userDetailsService(userDetailsService);
     }
 }
@@ -676,6 +696,7 @@ class OAuth2Configuration extends AuthorizationServerConfigurerAdapter {
 
     @Override
     public void configure(ClientDetailsServiceConfigurer clients) throws Exception {
+
         clients.inMemory()
                 .withClient("android-" + applicationName)
                 .authorizedGrantTypes("password", "authorization_code", "refresh_token")
@@ -716,17 +737,14 @@ class BookmarkRestController {
     ResponseEntity<?> add(@PathVariable String userId, @RequestBody Bookmark input) {
         return accountRepository.findByUsername(userId)
                 .map(account -> {
-                            Bookmark bookmark = bookmarkRepository.save(new Bookmark(account, input.uri, input.description));
-
+                            Bookmark bookmark = bookmarkRepository.save(
+                                    new Bookmark(account, input.uri, input.description));
                             HttpHeaders httpHeaders = new HttpHeaders();
-
                             Link forOneBookmark = new BookmarkResource(bookmark).getLink("self");
                             httpHeaders.setLocation(URI.create(forOneBookmark.getHref()));
-
                             return new ResponseEntity<>(null, httpHeaders, HttpStatus.CREATED);
                         }
                 ).orElseThrow(() -> new RuntimeException("could not find the user '" + userId + "'"));
-
     }
 
     @RequestMapping(value = "/{bookmarkId}", method = RequestMethod.GET)
@@ -750,10 +768,11 @@ class BookmarkRestController {
     }
 }
 
+
 ```
 
 
-TODO: talk about storing Access Tokens in a single store that multiple client nodes use for federated ID in mind. Then show how you can use Spring Boot's autoconfiguration approach to share across an organization's services w/ no configuration apart from `@EnableAutoConfiguration`. Show an example of Spring Security OAuth persiting to Redis or something more horizontally scalable than a SQL DB.   
+<!-- TODO: talk about storing Access Tokens in a single store that multiple client nodes use for federated ID in mind. Then show how you can use Spring Boot's autoconfiguration approach to share across an organization's services w/ no configuration apart from `@EnableAutoConfiguration`. Show an example of Spring Security OAuth persiting to Redis or something more horizontally scalable than a SQL DB.    -->
 
 
 #### Testing a Secure REST Service

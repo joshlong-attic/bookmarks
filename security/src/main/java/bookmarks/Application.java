@@ -59,14 +59,15 @@ public class Application {
 
     // CORS
     @Bean
-    FilterRegistrationBean corsFilter(@Value("${tagit.origin:}") String origin) {
+    FilterRegistrationBean corsFilter(@Value("${tagit.origin:http://localhost:9000}") String origin) {
         return new FilterRegistrationBean(new Filter() {
             public void doFilter(ServletRequest req, ServletResponse res, FilterChain chain)
                     throws IOException, ServletException {
                 HttpServletRequest request = (HttpServletRequest) req;
                 HttpServletResponse response = (HttpServletResponse) res;
                 String method = request.getMethod();
-                response.setHeader("Access-Control-Allow-Origin", "http://localhost:9000");
+                // this origin value could just as easily have come from a database
+                response.setHeader("Access-Control-Allow-Origin", origin);
                 response.setHeader("Access-Control-Allow-Methods", "POST,GET,OPTIONS,DELETE");
                 response.setHeader("Access-Control-Max-Age", Long.toString(60 * 60));
                 response.setHeader("Access-Control-Allow-Credentials", "true");
@@ -87,10 +88,10 @@ public class Application {
     }
 
     // expose HTTPS
-    @Profile("ssl")
+    @Profile("https")
     @Bean
-    EmbeddedServletContainerCustomizer containerCustomizer(@Value("${keystore.file}") Resource keystoreFile,
-                                                           @Value("${keystore.pass}") String keystorePass) throws Exception {
+    EmbeddedServletContainerCustomizer https(@Value("${keystore.file}") Resource keystoreFile,
+                                             @Value("${keystore.pass}") String keystorePass) throws Exception {
 
         String absoluteKeystoreFile = keystoreFile.getFile().getAbsolutePath();
         return (ConfigurableEmbeddedServletContainer container) -> {
@@ -112,7 +113,6 @@ public class Application {
             }
         };
     }
-
 
     @Bean
     CommandLineRunner init(AccountRepository accountRepository, BookmarkRepository bookmarkRepository) {
@@ -139,9 +139,9 @@ class WebSecurityConfiguration extends GlobalAuthenticationConfigurerAdapter {
     @Override
     public void init(AuthenticationManagerBuilder auth) throws Exception {
         UserDetailsService userDetailsService = (username) ->
-            accountRepository.findByUsername(username)
-                .map(a -> new User(a.username, a.password, true, true, true, true, AuthorityUtils.createAuthorityList("USER", "write")))
-                .orElseThrow(() -> new UsernameNotFoundException("could not find the user '" + username + "'"));
+                accountRepository.findByUsername(username)
+                        .map(a -> new User(a.username, a.password, true, true, true, true, AuthorityUtils.createAuthorityList("USER", "write")))
+                        .orElseThrow(() -> new UsernameNotFoundException("could not find the user '" + username + "'"));
         auth.userDetailsService(userDetailsService);
     }
 }
@@ -165,6 +165,7 @@ class OAuth2Configuration extends AuthorizationServerConfigurerAdapter {
 
     @Override
     public void configure(ClientDetailsServiceConfigurer clients) throws Exception {
+
         clients.inMemory()
                 .withClient("android-" + applicationName)
                 .authorizedGrantTypes("password", "authorization_code", "refresh_token")
@@ -205,17 +206,14 @@ class BookmarkRestController {
     ResponseEntity<?> add(@PathVariable String userId, @RequestBody Bookmark input) {
         return accountRepository.findByUsername(userId)
                 .map(account -> {
-                            Bookmark bookmark = bookmarkRepository.save(new Bookmark(account, input.uri, input.description));
-
+                            Bookmark bookmark = bookmarkRepository.save(
+                                    new Bookmark(account, input.uri, input.description));
                             HttpHeaders httpHeaders = new HttpHeaders();
-
                             Link forOneBookmark = new BookmarkResource(bookmark).getLink("self");
                             httpHeaders.setLocation(URI.create(forOneBookmark.getHref()));
-
                             return new ResponseEntity<>(null, httpHeaders, HttpStatus.CREATED);
                         }
                 ).orElseThrow(() -> new RuntimeException("could not find the user '" + userId + "'"));
-
     }
 
     @RequestMapping(value = "/{bookmarkId}", method = RequestMethod.GET)
