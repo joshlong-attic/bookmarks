@@ -50,6 +50,8 @@
     <properties>
         <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
         <java.version>1.8</java.version>
+        <spring-security.version>4.0.0.CI-SNAPSHOT</spring-security.version>
+        <spring.version>4.1.0.BUILD-SNAPSHOT</spring.version>
     </properties>
     <repositories>
         <repository>
