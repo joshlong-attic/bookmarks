@@ -4,6 +4,7 @@ import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.CommandLineRunner;
 import org.springframework.boot.SpringApplication;
 import org.springframework.boot.autoconfigure.EnableAutoConfiguration;
+import org.springframework.boot.autoconfigure.batch.BatchAutoConfiguration;
 import org.springframework.boot.builder.SpringApplicationBuilder;
 import org.springframework.boot.context.embedded.FilterRegistrationBean;
 import org.springframework.boot.context.web.SpringBootServletInitializer;
@@ -17,6 +18,7 @@ import javax.servlet.http.HttpServletRequest;
 import javax.servlet.http.HttpServletResponse;
 import java.io.IOException;
 import java.util.Arrays;
+import java.util.List;
 
 //
 // curl -X POST -vu android-bookmarks:123456 http://localhost:8080/oauth/token -H "Accept: application/json" -d "password=password&username=jlong&grant_type=password&scope=write&client_secret=123456&client_id=android-bookmarks"
@@ -24,12 +26,12 @@ import java.util.Arrays;
 
 @Configuration
 @ComponentScan
-@EnableAutoConfiguration
+@EnableAutoConfiguration(exclude = BatchAutoConfiguration.class)
 public class Application extends SpringBootServletInitializer {
 
     // CORS
     @Bean
-    FilterRegistrationBean corsFilter(@Value("${tagit.origin:http://localhost:9000}") String origin) {
+    FilterRegistrationBean corsFilter( final @Value("${tagit.origin:http://localhost:9000}") String origin) {
         return new FilterRegistrationBean(new Filter() {
             public void doFilter(ServletRequest req, ServletResponse res, FilterChain chain)
                     throws IOException, ServletException {
@@ -59,13 +61,21 @@ public class Application extends SpringBootServletInitializer {
 
 
     @Bean
-    CommandLineRunner init(AccountRepository accountRepository, BookmarkRepository bookmarkRepository) {
-        return (evt) ->
-                Arrays.asList("jhoeller", "dsyer", "jlong", "pwebb", "ogierke", "rwinch", "mfisher", "mpollack").forEach(a -> {
+    CommandLineRunner init(final AccountRepository accountRepository,
+                           final BookmarkRepository bookmarkRepository) {
+        return new CommandLineRunner() {
+            @Override
+            public void run(String... args) throws Exception {
+                List<String> names = Arrays.asList("jhoeller", "dsyer", "jlong", "pwebb", "ogierke", "rwinch", "mfisher", "mpollack");
+                for (String a : names) {
                     Account account = accountRepository.save(new Account(a, "password"));
                     bookmarkRepository.save(new Bookmark(account, "http://bookmark.com/1/" + a, "A description"));
                     bookmarkRepository.save(new Bookmark(account, "http://bookmark.com/2/" + a, "A description"));
-                });
+
+                }
+            }
+        };
+
     }
 
     public static void main(String[] args) {

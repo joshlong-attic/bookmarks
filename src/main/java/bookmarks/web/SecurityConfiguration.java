@@ -1,5 +1,6 @@
 package bookmarks.web;
 
+import bookmarks.Account;
 import bookmarks.AccountRepository;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.context.annotation.Configuration;
@@ -8,6 +9,7 @@ import org.springframework.security.config.annotation.authentication.builders.Au
 import org.springframework.security.config.annotation.authentication.configurers.GlobalAuthenticationConfigurerAdapter;
 import org.springframework.security.core.authority.AuthorityUtils;
 import org.springframework.security.core.userdetails.User;
+import org.springframework.security.core.userdetails.UserDetails;
 import org.springframework.security.core.userdetails.UserDetailsService;
 import org.springframework.security.core.userdetails.UsernameNotFoundException;
 import org.springframework.security.oauth2.config.annotation.configurers.ClientDetailsServiceConfigurer;
@@ -25,11 +27,17 @@ class SecurityConfiguration extends GlobalAuthenticationConfigurerAdapter {
 
     @Override
     public void init(AuthenticationManagerBuilder auth) throws Exception {
-        UserDetailsService userDetailsService = (username) ->
-                accountRepository.findByUsername(username)
-                        .map(a -> new User(a.username, a.password, true, true, true, true, AuthorityUtils.createAuthorityList("USER", "write")))
-                        .orElseThrow(() -> new UsernameNotFoundException("could not find the user '" + username + "'"));
-        auth.userDetailsService(userDetailsService);
+
+        auth.userDetailsService(new UserDetailsService() {
+            @Override
+            public UserDetails loadUserByUsername(String username) throws UsernameNotFoundException {
+                Account a = accountRepository.findByUsername(username);
+                if (a != null) {
+                    return new User(a.username, a.password, true, true, true, true, AuthorityUtils.createAuthorityList("USER", "write"));
+                }
+                throw new UsernameNotFoundException("could not find the user " + username + ".");
+            }
+        });
     }
 }
 
