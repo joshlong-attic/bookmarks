@@ -480,6 +480,14 @@ class BookmarkRestController {
  	 talk about sending about useful response 
  	 talk about status codes through @ControllerAdvice 
 -->
+REST APIs are exposed through HTTP. HTTP *is* the contract. It follows that error-handling in a REST API follows the norms of HTTP, as well. There are a few layers that you may introduce error handling in Spring MVC. 
+
+#### Returning an appropriate Mime-Type - `VndErrors`
+
+#### Send Usable Error Messages
+Remember, error handling is as much about development as production. Human beings - actual people - will rely on the constraints conveyed through helpful error messages to build their clients. Providing useful error messages is a huge way to improve development velocity.
+
+#### Generic Error Handling with `@ControllerAdvice` 
 
 
 
@@ -510,10 +518,10 @@ We can authenticate client requests in a myriad of ways. Clients could send, for
 
 Our API is meant to be consumed over the open-web. It's meant to be used by all manner of HTML5 and native mobile and desktop clients that we intend to build. We shall use  diverse clients with diverse security capabilities, and any solution we pick should be able to accomodate that. We should also decouple the user's username and password from the application's session. After all, if I reset my Twitter password, I don't want to be forced to re-authenticate every client signed in. On the other hand, if someone *does* hijack one of our clients (perhaps a user has lost a  phone), we don't want the party that stole the device to be able to lock our users out of their accounts. 
  
-OAuth provides a clean way to handle these concerns.  You've no doubt used OAuth already. One common case is when installing a Facebook plugin or game. Typically the flow looks like this: 
+[OAuth](http://oauth.net/) provides a clean way to handle these concerns.  You've no doubt used OAuth already. One common case is when installing a Facebook plugin or game. Typically the flow looks like this: 
 
-* user finds a game or piece of functionality on the wbe that requires access to a user's Facebook data in order to function. One common example is "Sign in With Facebook"-style scenarios.
-* a user clicks "install," or "add," and is then redirected to Facebook.com where the user is prompted to grant certain permissions (like "Post to wall," or "Read Basic information") 
+* user finds a game or piece of functionality on the web that requires access to a user's Facebook data in order to function. One common example is "Sign in With Facebook"-style scenarios.
+* a user clicks "install," or "add," and is then redirected to a trusted domain (for example: Facebook.com) where the user is prompted to grant certain permissions (like "Post to wall," or "Read Basic information") 
 * the user confirms these permissions and is subsequently redirected back to the source application where the source application now has an access token. It will use this access token to make requests  to Facebook on your behalf.  
 
 In this example, any old client can talk to Facebook and the client has, at the end of the process, an access token. This access token is transmitted via all subsequent REST requests, sort of like an HTTP cookie. The username and password need not be retransmitted and the client may cache the access token for a finite or infinite period. Users of the client need not re-authenticate every time they open an application, for example. Even better: access tokens are specific to each client. They may be used to signal that one client needs more permissoins than others.  In the flow above, requests always ended up at Facebook.com where - if the user is not already signed into Facebook, he or she will be pompted to login and then assign permissions to the client. This has the benefit of ensuring that any sensitive information, like a username and password, is never entered in the wild in untrusted applications that might maliciously try to capture that username and password. Our application, will not be available to any old client. We can be sure that any client we deploy is *friendly*, as it will be one of *our* clients. OAuth supports a simpler flow whereby a user authenticates (typically by sending a username and password) from the client and the service returns an OAuth access token directly, sidestepping the need for a redirect to a trusted domain. This is the approach we will take: the reuslt will be that our clients will have an access token that's decoupled from the user's username and password, and the access token can be used to confer different levels of security on different clients.  
@@ -526,7 +534,7 @@ OAuth is very flexible. You could, for example, deploy an authorization server t
 We expect that some of the clients to our service will be HTML5-based. They will want to talk to our REST API from different domains, and in most browsers this runs afoul of cross-site-scripting security measures. We can explicitly enable XSS for well-known clients by exposing CORS (cross-origin request scripting) headers. These headers, when present in the service responses, signal to the browser that requests of the origin, shape and configuration described in the headers *are* permitted, even across domains. Our API is decorated with a simple `javax.servlet.Filter` that adds these headers on every request. In the example, we're delegating to a property - `tagit.origin` - if provided or a default of `http://localhost:9000` where we might have, for example, a JavaScript client making requests to the service. We could just as easily read this information from a datastore which we can change without recompiling the code. We've only specified a single origin here, but we could just as easily specified numerous clients.  
 
 ### Using HTTPS (SSL/TLS) to prevent Man-in-the-Middle Attacks
-Spring Boot provides an embedded web server (Apache Tomcat, by default) that can be configured programmatically to do anything that the standalone Apache Tomcat webserver can do.  To configure HTTPS (SSL/TLS), you need only register a `org.springframework.boot.context.embedded.EmbeddedServletContainerCustomizer` bean. Our bean simply wires up the Apache Tomcat connector to support HTTPS (SSL or TLS-encrypted) traffic. HTTPS requires a signed certificate certificate and a certificate password which we provide using property values. Note that, to support ease of configuration, this bean's only available using the Spring profile `https`. 
+Spring Boot provides an embedded web server (Apache Tomcat, by default) that can be configured programmatically to do anything that the standalone Apache Tomcat webserver can do.  To configure HTTPS (SSL/TLS), you need only register a `org.springframework.boot.context.embedded.EmbeddedServletContainerCustomizer` bean. Our bean simply wires up the Apache Tomcat connector to support HTTPS (SSL or TLS-encrypted) traffic. HTTPS requires a signed certificate certificate and a certificate password which we provide using property values. Note that, to support ease of configuration, this bean's only available using the Spring profile named `https`: this means that you can run and test the application *without* the profile applied or switch it on just as easily. 
 
 ### Putting it All Together 
 
