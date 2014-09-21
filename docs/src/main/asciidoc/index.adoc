@@ -1,0 +1,10 @@
+= REST
+
+== Using Spring Bopot's Default REST Support
+
+== HATEOAS
+== Spring Data REST
+== Using Swagger 
+=== Matt Raible's Auto-Configuration   
+ 
+ 
