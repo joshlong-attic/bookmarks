@@ -778,15 +778,3 @@ class BookmarkRestController {
 
 
 ```
-
-
-<!-- TODO: talk about storing Access Tokens in a single store that multiple client nodes use for federated ID in mind. Then show how you can use Spring Boot's autoconfiguration approach to share across an organization's services w/ no configuration apart from `@EnableAutoConfiguration`. Show an example of Spring Security OAuth persiting to Redis or something more horizontally scalable than a SQL DB.    -->
-
-
-#### Testing a Secure REST Service
-<!-- Sometimes Rob Winch has to help put out fires, rescue cats from trees, lead/develop/release one of his 50 or so amazing projects and - ever so infrequently - eat or sleep. Im sure he'd probably help us with this section, too, though. He's busy. But not Rob-busy.  -->
-
-## Consuming an OAuth REST Service 
-
-
-
