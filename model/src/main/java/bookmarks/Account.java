@@ -14,11 +14,27 @@ import java.util.Set;
 public class Account {
 
     @OneToMany(mappedBy = "account")
-    public Set<Bookmark> bookmarks = new HashSet<>();
+    private Set<Bookmark> bookmarks = new HashSet<>();
 
     @Id
     @GeneratedValue
-    public Long id;
+    private Long id;
+
+    public Set<Bookmark> getBookmarks() {
+        return bookmarks;
+    }
+
+    public Long getId() {
+        return id;
+    }
+
+    public String getPassword() {
+        return password;
+    }
+
+    public String getUsername() {
+        return username;
+    }
 
     @JsonIgnore
     public String password;

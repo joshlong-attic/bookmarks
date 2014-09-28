@@ -4,24 +4,18 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.CommandLineRunner;
 import org.springframework.boot.SpringApplication;
 import org.springframework.boot.autoconfigure.EnableAutoConfiguration;
-import org.springframework.context.ApplicationListener;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.ComponentScan;
 import org.springframework.context.annotation.Configuration;
-import org.springframework.context.event.ContextRefreshedEvent;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
+import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.web.bind.annotation.*;
-import org.springframework.web.multipart.MultipartFile;
-import org.springframework.web.multipart.MultipartResolver;
 import org.springframework.web.servlet.support.ServletUriComponentsBuilder;
 
-import java.security.Principal;
 import java.util.Arrays;
 import java.util.Collection;
-import java.util.List;
-import java.util.stream.Collectors;
 
 
 @Configuration
@@ -30,14 +24,17 @@ import java.util.stream.Collectors;
 public class Application {
 
     @Bean
-    CommandLineRunner init(AccountRepository accountRepository, BookmarkRepository bookmarkRepository) {
+    CommandLineRunner init(
+            PlatformTransactionManager tx,
+            AccountRepository accountRepository,
+            BookmarkRepository bookmarkRepository) {
         return (evt) ->
-                Arrays.asList("jhoeller,dsyer,pwebb,ogierke,rwinch,mfisher,mpollack")
+                Arrays.asList("jhoeller,dsyer,pwebb,ogierke,rwinch,mfisher,mpollack,jlong".split(","))
                         .forEach(a -> {
-                    Account account = accountRepository.save(new Account(a, "password"));
-                    bookmarkRepository.save(new Bookmark(account, "http://bookmark.com/1/" + a, "A description"));
-                    bookmarkRepository.save(new Bookmark(account, "http://bookmark.com/2/" + a, "A description"));
-                });
+                            Account account = accountRepository.save(new Account(a, "password"));
+                            bookmarkRepository.save(new Bookmark(account, "http://bookmark.com/1/" + a, "A description"));
+                            bookmarkRepository.save(new Bookmark(account, "http://bookmark.com/2/" + a, "A description"));
+                        });
     }
 
     public static void main(String[] args) {
@@ -61,7 +58,7 @@ class BookmarkRestController {
 
                     HttpHeaders httpHeaders = new HttpHeaders();
                     httpHeaders.setLocation(ServletUriComponentsBuilder.fromCurrentRequest().path("/{id}")
-                            .buildAndExpand(result.id)
+                            .buildAndExpand(result.getId())
                             .toUri());
                     return new ResponseEntity<>(null, httpHeaders, HttpStatus.CREATED);
                 }

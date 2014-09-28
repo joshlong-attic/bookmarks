@@ -143,7 +143,9 @@ include::{book-root}{rest-application}[]
  
 The `{userId}` and `{bookmarkId}` tokens in the path are *path variables*. They're globs, or wildcards. Spring MVC will extract those portions of the URI, and make them available as arguments of the same name that are  passed to the controller method and annotated with `@PathVariable`. For an HTTP `GET` request to the URI `/bob/bookmarks/4234`, the `@PathVariable String userId` argument will be `"bob"`, and the `@PathVariable Long bookmarkId` will be coerced to a `long` value of `4234`. 
  
-These controller methods return simple POJOs - `Collection<Bookmark>`, and `Bookmark`, etc., in all but the `add` case. Spring MVC converts these return values using *content-negotiation*. Spring MVC will inspect the requested, `Accept`-able response mime-types, then find a configured `HttpMessageConverter` that claims to be able to convert objects to that mime type, if one is configured. Spring Boot automatically wires up  an `HttpMessageConverter` that can convert generic `Object` s to http://www.json.org[JSON], absent any more specific converter. `HttpMessageConverter` s work in both directions: incoming requests bodies can be converted to Java objects, and Java objects can be converted into HTTP response bodies. 
+These controller methods return simple POJOs - `Collection<Bookmark>`, and `Bookmark`, etc., in all but the `add` case. When an HTTP request comes in that specifies an `Accept` header, Spring MVC loops through the configured `HttpMessageConverter` until it finds one that can convert from the POJO domain model types into the content-type specified in the `Accept` header, if so configured. Spring Boot automatically wires up  an `HttpMessageConverter` that can convert generic `Object` s to http://www.json.org[JSON], absent any more specific converter. `HttpMessageConverter` s work in both directions: incoming requests bodies are converted to Java objects, and Java objects are converted into HTTP response bodies. 
+ 
+Use `curl` (or your browser) to see the JSON response from `http://localhost:8080/jhoeller/bookmarks`.
  
 The `add` method specifies a parameter of type `Bookmark` - a POJO. Spring MVC will convert the incoming HTTP request (containing, perhaps, valid JSON) to a POJO using the appropriate `HttpMessageConverter`. 
  
@@ -158,6 +160,9 @@ This code can be easily unit tested, extended through Spring AOP. We'll look at 
 
 #### Testing a REST Service
 // todo general purpose information on testing REST endponts 
+
+
+
 
 ## Building a HATEOAS REST Service
 

@@ -12,11 +12,11 @@ public class Bookmark {
 
     @JsonIgnore
     @ManyToOne
-    public Account account;
+    private Account account;
 
     @Id
     @GeneratedValue
-    public Long id;
+    private Long id;
 
     Bookmark() { // jpa only
     }
@@ -29,4 +29,20 @@ public class Bookmark {
 
     public String uri;
     public String description;
+
+    public Account getAccount() {
+        return account;
+    }
+
+    public Long getId() {
+        return id;
+    }
+
+    public String getUri() {
+        return uri;
+    }
+
+    public String getDescription() {
+        return description;
+    }
 }

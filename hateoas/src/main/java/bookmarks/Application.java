@@ -31,7 +31,7 @@ public class Application {
     @Bean
     CommandLineRunner init(AccountRepository accountRepository, BookmarkRepository bookmarkRepository) {
         return (evt) ->
-                Arrays.asList("jhoeller,dsyer,pwebb,ogierke,rwinch,mfisher,mpollack")
+                Arrays.asList("jhoeller,dsyer,pwebb,ogierke,rwinch,mfisher,mpollack,jlong".split(","))
                         .forEach(a -> {
                     Account account = accountRepository.save(new Account(a, "password"));
                     bookmarkRepository.save(new Bookmark(account, "http://bookmark.com/1/" + a, "A description"));
@@ -49,11 +49,11 @@ class BookmarkResource extends ResourceSupport {
     private final Bookmark bookmark;
 
     public BookmarkResource(Bookmark bookmark) {
-        String username = bookmark.account.username;
+        String username = bookmark.getAccount().getUsername();
         this.bookmark = bookmark;
-        this.add(new Link(bookmark.uri, "bookmark-uri"));
+        this.add(new Link(bookmark.getUri(), "bookmark-uri"));
         this.add(linkTo(BookmarkRestController.class, username).withRel("bookmarks"));
-        this.add(linkTo(methodOn(BookmarkRestController.class, username).readBookmark(username, bookmark.id)).withSelfRel());
+        this.add(linkTo(methodOn(BookmarkRestController.class, username).readBookmark(username, bookmark.getId())).withSelfRel());
     }
 
     public Bookmark getBookmark() {
