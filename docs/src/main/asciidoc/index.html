@@ -370,7 +370,6 @@ import org.springframework.context.annotation.Configuration;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
-import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.web.servlet.support.ServletUriComponentsBuilder;
 
@@ -384,15 +383,11 @@ import java.util.Collection;
 public class Application {
 
     @Bean
-    CommandLineRunner init(
-            PlatformTransactionManager tx,
-            AccountRepository accountRepository,
-            BookmarkRepository bookmarkRepository) {
+    CommandLineRunner init(AccountRepository accountRepository, BookmarkRepository bookmarkRepository) {
         return (evt) -&gt;
                 Arrays.asList("jhoeller,dsyer,pwebb,ogierke,rwinch,mfisher,mpollack,jlong".split(","))
                         .forEach(a -&gt; {
                             Account account = accountRepository.save(new Account(a, "password"));
-                            System.out.println("account.id=" + account.getId());
                             bookmarkRepository.save(new Bookmark(account, "http://bookmark.com/1/" + a, "A description"));
                             bookmarkRepository.save(new Bookmark(account, "http://bookmark.com/2/" + a, "A description"));
                         });
@@ -408,12 +403,14 @@ public class Application {
 class BookmarkRestController {
 
     private final BookmarkRepository bookmarkRepository;
-    private final AccountRepository accountRepository;
 
+    private final AccountRepository accountRepository;
 
     @RequestMapping(method = RequestMethod.POST)
     ResponseEntity&lt;?&gt; add(@PathVariable String userId, @RequestBody Bookmark input) {
-        return accountRepository.findByUsername(userId).map(
+        this.validateUser(userId);
+        return this.accountRepository.findByUsername(userId)
+            .map(
                 account -&gt; {
                     Bookmark result = bookmarkRepository.save(new Bookmark(account, input.uri, input.description));
 
@@ -423,24 +420,38 @@ class BookmarkRestController {
                             .toUri());
                     return new ResponseEntity&lt;&gt;(null, httpHeaders, HttpStatus.CREATED);
                 }
-        ).orElseThrow(() -&gt; new RuntimeException("could not find the user '" + userId + "'"));
+        ).get();
 
     }
 
     @RequestMapping(value = "/{bookmarkId}", method = RequestMethod.GET)
     Bookmark readBookmark(@PathVariable String userId, @PathVariable Long bookmarkId) {
+        this.validateUser(userId);
         return this.bookmarkRepository.findOne(bookmarkId);
     }
 
     @RequestMapping(method = RequestMethod.GET)
     Collection&lt;Bookmark&gt; readBookmarks(@PathVariable String userId) {
-        return bookmarkRepository.findByAccountUsername(userId);
+        this.validateUser(userId);
+        return this.bookmarkRepository.findByAccountUsername(userId);
     }
 
     @Autowired
     BookmarkRestController(BookmarkRepository bookmarkRepository, AccountRepository accountRepository) {
         this.bookmarkRepository = bookmarkRepository;
         this.accountRepository = accountRepository;
+    }
+
+    private void validateUser(String userId) {
+        this.accountRepository.findByUsername(userId).orElseThrow(() -&gt; new UserNotFoundException(userId));
+    }
+}
+
+@ResponseStatus(HttpStatus.NOT_FOUND)
+class UserNotFoundException extends RuntimeException {
+
+    public UserNotFoundException(String userId) {
+        super("could not find user '" + userId + "'.");
     }
 }</code></pre>
 </div>
@@ -476,9 +487,167 @@ class BookmarkRestController {
 <p>Spring MVC makes it easy to write service-oriented code whose shape is untainted by <code>HttpServlet</code> APIs.
 This code can be easily unit tested, extended through Spring AOP. We&#8217;ll look at how to unit test these Spring MVC components in the next section.</p>
 </div>
-<div class="sect3">
-<h4 id="_testing_a_rest_service">Testing a REST Service</h4>
+<div class="sect2">
+<h3 id="_using_http_to_signal_errors">Using HTTP to signal Errors</h3>
+<div class="paragraph">
+<p>All the methods in the REST service call <code>validateUser</code> which in turn verifies that the user in question exists and - if it doesn&#8217;t - throws a <code>UserNotFoundException</code>. The definition of this exception is shown. It&#8217;s annotated with a Spring MVC <code>@ResponseStatus(HttpStatus.NOT_FOUND)</code> which tells Spring MVC to send back an HTTP status code (404) whenever this exception is triggered. This is a <em>really</em> nice arrangement: you can think in terms of your business domain in your code <em>and</em> you get smart handling that maps nicely to how HTTP signals erros to the client, using status codes. Spring MVC provides a <em>lot</em> of different places to cleanly <a href="https://spring.io/blog/2013/11/01/exception-handling-in-spring-mvc">layer in generic, application-global and controller-local error handling logic</a>.</p>
+</div>
+</div>
+<div class="sect2">
+<h3 id="_testing_a_rest_service">Testing a REST Service</h3>
+<div class="paragraph">
+<p>Spring MVC provides great support <a href="http://docs.spring.io/spring-framework/docs/current/spring-framework-reference/html/testing.html#spring-mvc-test-framework">for unit testing HTTP endpoints</a>. It provides a very nice middle ground between unit-testing and integration-testing in that it lets you stand up the entire Spring MVC <code>DispatcherServlet</code>-based machinery - including validators, <code>HttpMessageConverter</code> s, and more - and then run tests against them <em>without</em> actually starting up a <em>real</em> HTTP service: the best of both worlds! It&#8217;s an integration-test in that the logic you care about is actually being exercised, but it&#8217;s a unit-test in that you&#8217;re not actually waiting for a web server to initialize and start servicing requests.</p>
+</div>
+<div class="paragraph">
+<p>Here&#8217;s the unit-test for the <code>ReservationRestController</code>, in <code>/rest/src/test/java/bookmarks/BookmarkRestControllerTest.java</code>. This should look familiar to anybody who has written a JUnit unit test before. At the top, we use the <code>@SpringApplicationConfiguration(classes = Application.class)</code> annotation (from Spring Boot) to tell the <code>SpringJUnit4ClassRunner</code> where it should get information about the Spring application under test. The <code>@WebAppConfiguration</code> annotation tells JUnit that this is a unit test for Spring MVC web components and should thus run under a <code>WebApplicationContext</code> variety, not a standard <code>ApplicationContext</code> implementation.</p>
+</div>
+<div class="listingblock">
+<div class="content">
+<pre class="prettyprint highlight"><code class="language-java" data-lang="java">package bookmarks;
 
+import org.junit.Assert;
+import org.junit.Before;
+import org.junit.Test;
+import org.junit.runner.RunWith;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.boot.test.SpringApplicationConfiguration;
+import org.springframework.http.MediaType;
+import org.springframework.http.converter.HttpMessageConverter;
+import org.springframework.http.converter.json.MappingJackson2HttpMessageConverter;
+import org.springframework.mock.http.MockHttpOutputMessage;
+import org.springframework.mock.web.MockHttpServletRequest;
+import org.springframework.test.context.junit4.SpringJUnit4ClassRunner;
+import org.springframework.test.context.web.WebAppConfiguration;
+import org.springframework.test.web.servlet.MockMvc;
+import org.springframework.web.context.WebApplicationContext;
+import org.springframework.web.context.request.RequestContextHolder;
+import org.springframework.web.context.request.ServletRequestAttributes;
+
+import java.io.IOException;
+import java.nio.charset.Charset;
+import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.List;
+
+import static org.hamcrest.Matchers.hasSize;
+import static org.hamcrest.Matchers.is;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.*;
+import static org.springframework.test.web.servlet.setup.MockMvcBuilders.webAppContextSetup;
+
+/**
+ * @author Josh Long
+ */
+@RunWith(SpringJUnit4ClassRunner.class)
+@SpringApplicationConfiguration(classes = Application.class)
+@WebAppConfiguration
+public class BookmarkRestControllerTest {
+
+
+    private MediaType contentType = new MediaType(MediaType.APPLICATION_JSON.getType(),
+            MediaType.APPLICATION_JSON.getSubtype(),
+            Charset.forName("utf8"));
+
+    private MockMvc mockMvc;
+
+    private String userName = "bdussault";
+
+    private HttpMessageConverter mappingJackson2HttpMessageConverter;
+
+    private Account account;
+
+    private List&lt;Bookmark&gt; bookmarkList = new ArrayList&lt;&gt;();
+
+    @Autowired
+    private BookmarkRepository bookmarkRepository;
+
+    @Autowired
+    private WebApplicationContext webApplicationContext;
+
+    @Autowired
+    private AccountRepository accountRepository;
+
+    @Autowired
+    void setConverters(HttpMessageConverter&lt;?&gt;[] converters) {
+
+        this.mappingJackson2HttpMessageConverter = Arrays.asList(converters).stream().filter(
+                hmc -&gt; hmc instanceof MappingJackson2HttpMessageConverter).findAny().get();
+
+        Assert.assertNotNull("the JSON message converter must not be null",
+                this.mappingJackson2HttpMessageConverter);
+    }
+
+    @Before
+    public void setup() throws Exception {
+        this.mockMvc = webAppContextSetup(webApplicationContext).build();
+
+        this.bookmarkRepository.deleteAllInBatch();
+        this.accountRepository.deleteAllInBatch();
+
+        this.account = accountRepository.save(new Account(userName, "password"));
+        this.bookmarkList.add(bookmarkRepository.save(new Bookmark(account, "http://bookmark.com/1/" + userName, "A description")));
+        this.bookmarkList.add(bookmarkRepository.save(new Bookmark(account, "http://bookmark.com/2/" + userName, "A description")));
+    }
+
+    @Test
+    public void userNotFound() throws Exception {
+        mockMvc.perform(post("/george/bookmarks/")
+                .content(this.json(new Bookmark()))
+                .contentType(contentType))
+                .andExpect(status().isNotFound());
+    }
+
+    @Test
+    public void readSingleBookmark() throws Exception {
+        mockMvc.perform(get("/" + userName + "/bookmarks/"
+                + this.bookmarkList.get(0).getId()))
+                .andExpect(status().isOk())
+                .andExpect(content().contentType(contentType))
+                .andExpect(jsonPath("$.id", is(this.bookmarkList.get(0).getId().intValue())))
+                .andExpect(jsonPath("$.uri", is("http://bookmark.com/1/" + userName)))
+                .andExpect(jsonPath("$.description", is("A description")));
+    }
+
+    @Test
+    public void readBookmarks() throws Exception {
+        mockMvc.perform(get("/" + userName + "/bookmarks"))
+                .andExpect(status().isOk())
+                .andExpect(content().contentType(contentType))
+                .andExpect(jsonPath("$", hasSize(2)))
+                .andExpect(jsonPath("$[0].id", is(this.bookmarkList.get(0).getId().intValue())))
+                .andExpect(jsonPath("$[0].uri", is("http://bookmark.com/1/" + userName)))
+                .andExpect(jsonPath("$[0].description", is("A description")))
+                .andExpect(jsonPath("$[1].id", is(this.bookmarkList.get(1).getId().intValue())))
+                .andExpect(jsonPath("$[1].uri", is("http://bookmark.com/2/" + userName)))
+                .andExpect(jsonPath("$[1].description", is("A description")));
+    }
+
+    @Test
+    public void createBookmark() throws Exception {
+        String bookmarkJson = json(new Bookmark(
+                this.account, "http://spring.io", "a bookmark to the best resource for Spring news and information"));
+        this.mockMvc.perform(post("/" + userName + "/bookmarks")
+                .contentType(contentType)
+                .content(bookmarkJson))
+                .andExpect(status().isCreated());
+    }
+
+    protected String json(Object o) throws IOException {
+        MockHttpOutputMessage mockHttpOutputMessage = new MockHttpOutputMessage();
+        this.mappingJackson2HttpMessageConverter.write(
+                o, MediaType.APPLICATION_JSON, mockHttpOutputMessage);
+        return mockHttpOutputMessage.getBodyAsString();
+    }
+}</code></pre>
+</div>
+</div>
+<div class="paragraph">
+<p>The first thing to look at is this <code>@Before</code>-annotated <code>setup</code> method. The first thing the <code>setup</code> method does is instantiate a  <code>MockMvc</code>  which requires a reference to the applicaton&#8217;s <code>WebApplicationContext</code>. The <code>MockMvc</code> is the center piece: all tests will invariably go through the <code>MockMvc</code> type to mock HTTP requests against the service. And&#8230;&#8203; that&#8217;s it! Look at any of the various tests. We can use the static imports on <code>org.springframework.test.web.servlet.request.MockMvcRequestBuilders.*</code> to chain together HTTP requests and verify the responses.</p>
+</div>
+<div class="paragraph">
+<p>All tests specify a <code>application/json</code> <code>content-type</code> and expect responses of that <code>content-type</code>, as well. The tests use the <code>MockMvcResultMatchers#jsonPath</code> method to validate the structure and contents of the JSON responses. This, in turn, uses the Jayway JSON Path API to run X-Path-style traversals on JSON structures, as we do in various places in the unit tests.</p>
+</div>
 </div>
 </div>
 </div>
@@ -489,8 +658,7 @@ This code can be easily unit tested, extended through Spring AOP. We&#8217;ll lo
 <p>The first cut of the API works very well. If this service were well documented, it would be workable for REST clients in many different languages. It is a clean API, in that it takes advantage of some of the primitives that HTTP provides, in a well-understood way. One measure of an API is by its compliance with  the <a href="http://en.wikipedia.org/wiki/Representational_state_transfer#Uniform_interface">uniform interface principle</a>. HTTP REST APIs like the one we have so far stack up pretty well. Each message includes enough information to describe how to process the message. For example, a client might  decide which parser to invoke based on  the <code>Content-Type</code> header in the request message. The state in the system is mapped into uniquely identifying resource URIs. State is addressable. Mutations in state are done through known HTTP verbs (<code>POST</code>, <code>GET</code>, <code>DELETE</code>, <code>PUT</code>, etc.). Thus, when a client holds a representation of a resource, including any metadata attached, it has enough information to modify or delete the resource.</p>
 </div>
 <div class="paragraph">
-<p>But, we can do better. The services as they stand are adequate to the task but lack.. <strong>staying power</strong>. &lt;wikipedia&gt; Clients must know the API a priori. Changes in the API break clients and they <strong>break</strong> the documentation about the service.  Hypermedia as the engine of application state (a.k.a. <a href="http://en.wikipedia.org/wiki/HATEOAS"><strong>HATEOAS</strong></a>) is one more constraint that addresses and removes this coupling.  Clients make state transitions only through actions that are dynamically identified within hypermedia by the server (e.g., by hyperlinks within hypertext). Except for simple fixed entry points to the application, a client does not assume that any particular action is available for any particular resources beyond those described in representations previously received from the server.
-&lt;/wikipedia&gt;</p>
+<p>But, we can do better. The services as they stand are adequate to the task but lack.. <strong>staying power</strong>. As Wikipedia says: Clients must know the API a priori. Changes in the API break clients and they <strong>break</strong> the documentation about the service.  Hypermedia as the engine of application state (a.k.a. <a href="http://en.wikipedia.org/wiki/HATEOAS"><strong>HATEOAS</strong></a>) is one more constraint that addresses and removes this coupling.  Clients make state transitions only through actions that are dynamically identified within hypermedia by the server (e.g., by hyperlinks within hypertext). Except for simple fixed entry points to the application, a client does not assume that any particular action is available for any particular resources beyond those described in representations previously received from the server.</p>
 </div>
 <div class="paragraph">
 <p>Let&#8217;s look at a revised cut of this API (in <code>/hateoas/src/main/java/bookmarks/Application.java</code>), this time embracing  HATEOAS with <a href="http://spring.io/projects/spring-hateoas">Spring HATEOAS</a>.  It is a slight simplification to say that Spring HATEOAS makes it easy to provide links - metadata about payloads being returned to the client - but that is how we will approach it. Fundamentally, all we will do is <strong>wrap</strong> our response payloads using Spring HATEOAS' <code>ResourceSupport</code> type. <code>ResourceSupport</code> accumulates <code>Link</code> objects which in turn describe useful, related resources. For example, a resource describing an account in an e-commerce solution could have a link to the resource for that account&#8217;s orders, a link to that account&#8217;s current shopping cart, and a link that can be used to retrieve that resources state again.</p>
@@ -509,6 +677,7 @@ import org.springframework.context.annotation.Configuration;
 import org.springframework.hateoas.Link;
 import org.springframework.hateoas.ResourceSupport;
 import org.springframework.hateoas.Resources;
+import org.springframework.hateoas.VndErrors;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
@@ -532,10 +701,10 @@ public class Application {
         return (evt) -&gt;
                 Arrays.asList("jhoeller,dsyer,pwebb,ogierke,rwinch,mfisher,mpollack,jlong".split(","))
                         .forEach(a -&gt; {
-                    Account account = accountRepository.save(new Account(a, "password"));
-                    bookmarkRepository.save(new Bookmark(account, "http://bookmark.com/1/" + a, "A description"));
-                    bookmarkRepository.save(new Bookmark(account, "http://bookmark.com/2/" + a, "A description"));
-                });
+                            Account account = accountRepository.save(new Account(a, "password"));
+                            bookmarkRepository.save(new Bookmark(account, "http://bookmark.com/1/" + a, "A description"));
+                            bookmarkRepository.save(new Bookmark(account, "http://bookmark.com/2/" + a, "A description"));
+                        });
     }
 
     public static void main(String[] args) {
@@ -570,6 +739,9 @@ class BookmarkRestController {
 
     @RequestMapping(method = RequestMethod.POST)
     ResponseEntity&lt;?&gt; add(@PathVariable String userId, @RequestBody Bookmark input) {
+
+        this.validateUser(userId);
+
         return accountRepository.findByUsername(userId)
                 .map(account -&gt; {
                             Bookmark bookmark = bookmarkRepository.save(new Bookmark(account, input.uri, input.description));
@@ -581,20 +753,25 @@ class BookmarkRestController {
 
                             return new ResponseEntity&lt;&gt;(null, httpHeaders, HttpStatus.CREATED);
                         }
-                ).orElseThrow(() -&gt; new RuntimeException("could not find the user '" + userId + "'"));
-
+                ).get();
     }
 
     @RequestMapping(value = "/{bookmarkId}", method = RequestMethod.GET)
     BookmarkResource readBookmark(@PathVariable String userId, @PathVariable Long bookmarkId) {
+        this.validateUser(userId);
         return new BookmarkResource(this.bookmarkRepository.findOne(bookmarkId));
     }
 
+
     @RequestMapping(method = RequestMethod.GET)
     Resources&lt;BookmarkResource&gt; readBookmarks(@PathVariable String userId) {
-        List&lt;BookmarkResource&gt; bookmarkResourceList =
-                bookmarkRepository.findByAccountUsername(userId).stream()
-                        .map(BookmarkResource::new).collect(Collectors.toList());
+
+        this.validateUser(userId);
+
+        List&lt;BookmarkResource&gt; bookmarkResourceList = bookmarkRepository.findByAccountUsername(userId)
+                .stream()
+                .map(BookmarkResource::new)
+                .collect(Collectors.toList());
         return new Resources&lt;BookmarkResource&gt;(bookmarkResourceList);
     }
 
@@ -603,6 +780,30 @@ class BookmarkRestController {
                            AccountRepository accountRepository) {
         this.bookmarkRepository = bookmarkRepository;
         this.accountRepository = accountRepository;
+    }
+
+    private void validateUser(String userId) {
+        this.accountRepository.findByUsername(userId)
+                .orElseThrow(() -&gt; new UserNotFoundException(userId));
+    }
+}
+
+@ControllerAdvice
+class BookmarkControllerAdvice {
+
+    @ResponseBody
+    @ExceptionHandler(UserNotFoundException.class)
+    @ResponseStatus(HttpStatus.NOT_FOUND)
+    VndErrors vndErrors(UserNotFoundException ex) {
+        return new VndErrors("error", ex.getMessage());
+    }
+}
+
+
+class UserNotFoundException extends RuntimeException {
+
+    public UserNotFoundException(String userId) {
+        super("could not find user '" + userId + "'.");
     }
 }</code></pre>
 </div>
@@ -616,28 +817,6 @@ At a minimum, a resource should provide a link to itself (usually a link whose <
 </div>
 <div class="paragraph">
 <p>With this in place, the only remaining changes substitute  <code>Bookmark</code> types for <code>BookmarkResource</code> types.</p>
-</div>
-</div>
-</div>
-<div class="sect1">
-<h2 id="_error_handling">Error Handling</h2>
-<div class="sectionbody">
-<div class="paragraph">
-<p>REST APIs are exposed through HTTP. HTTP <strong>is</strong> the contract. It follows that error-handling in a REST API follows the norms of HTTP, as well. There are a few layers that you may introduce error handling in Spring MVC.</p>
-</div>
-<div class="sect2">
-<h3 id="_returning_an_appropriate_mime_type_code_vnderrors_code">Returning an appropriate Mime-Type - <code>VndErrors</code></h3>
-
-</div>
-<div class="sect2">
-<h3 id="_send_usable_error_messages">Send Usable Error Messages</h3>
-<div class="paragraph">
-<p>Remember, error handling is as much about development as production. Human beings - actual people - will rely on the constraints conveyed through helpful error messages to build their clients. Providing useful error messages is a huge way to improve development velocity.</p>
-</div>
-</div>
-<div class="sect2">
-<h3 id="_generic_error_handling_with_code_controlleradvice_code">Generic Error Handling with <code>@ControllerAdvice</code></h3>
-
 </div>
 </div>
 </div>
@@ -858,11 +1037,15 @@ class WebSecurityConfiguration extends GlobalAuthenticationConfigurerAdapter {
 
     @Override
     public void init(AuthenticationManagerBuilder auth) throws Exception {
-        UserDetailsService userDetailsService = (username) -&gt;
+        auth.userDetailsService(userDetailsService());
+    }
+
+    @Bean
+    UserDetailsService userDetailsService ( ){
+        return  (username) -&gt;
                 accountRepository.findByUsername(username)
                         .map(a -&gt; new User(a.username, a.password, true, true, true, true, AuthorityUtils.createAuthorityList("USER", "write")))
                         .orElseThrow(() -&gt; new UsernameNotFoundException("could not find the user '" + username + "'"));
-        auth.userDetailsService(userDetailsService);
     }
 }
 
@@ -958,23 +1141,13 @@ class BookmarkRestController {
 }</code></pre>
 </div>
 </div>
-<div class="sect3">
-<h4 id="_testing_a_secure_rest_service">Testing a Secure REST Service</h4>
-
 </div>
-</div>
-</div>
-</div>
-<div class="sect1">
-<h2 id="_consuming_an_oauth_rest_service">Consuming an OAuth REST Service</h2>
-<div class="sectionbody">
-
 </div>
 </div>
 </div>
 <div id="footer">
 <div id="footer-text">
-Last updated 2014-09-27 19:08:34 PDT
+Last updated 2014-09-28 20:37:59 PDT
 </div>
 </div>
 </body>

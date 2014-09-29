@@ -138,11 +138,15 @@ class WebSecurityConfiguration extends GlobalAuthenticationConfigurerAdapter {
 
     @Override
     public void init(AuthenticationManagerBuilder auth) throws Exception {
-        UserDetailsService userDetailsService = (username) ->
+        auth.userDetailsService(userDetailsService());
+    }
+
+    @Bean
+    UserDetailsService userDetailsService ( ){
+        return  (username) ->
                 accountRepository.findByUsername(username)
                         .map(a -> new User(a.username, a.password, true, true, true, true, AuthorityUtils.createAuthorityList("USER", "write")))
                         .orElseThrow(() -> new UsernameNotFoundException("could not find the user '" + username + "'"));
-        auth.userDetailsService(userDetailsService);
     }
 }
 

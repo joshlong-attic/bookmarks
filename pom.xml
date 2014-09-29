@@ -8,7 +8,7 @@
         <groupId>org.springframework.boot</groupId>
         <artifactId>spring-boot-starter-parent</artifactId>
         <version>1.1.7.RELEASE</version>
-    </parent>
+     </parent>
 
     <groupId>bookmarks</groupId>
     <artifactId>bookmarks</artifactId>
@@ -17,11 +17,15 @@
     <modules>
         <module>docs</module>
         <module>rest</module>
-        <module>security</module>
+         <module>security</module>
         <module>model</module>
         <module>hateoas</module>
     </modules>
-    <dependencies>
+    <dependencies>   <dependency>
+        <groupId>com.jayway.jsonpath</groupId>
+        <artifactId>json-path</artifactId>
+        <scope>test</scope>
+    </dependency>
         <dependency>
             <groupId>org.springframework.boot</groupId>
             <artifactId>spring-boot-starter-test</artifactId>
