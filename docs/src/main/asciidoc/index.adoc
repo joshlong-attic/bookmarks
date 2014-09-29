@@ -211,7 +211,13 @@ At a minimum, a resource should provide a link to itself (usually a link whose `
 
 With this in place, the only remaining changes substitute  `Bookmark` types for `BookmarkResource` types. 
 
+###  Improved Error Handling with `VndErrors`
 
+HATEOAS gives clients  improved metadata about the service itself. We can improve the situation for our error handling, as well. HTTP status codes tell the client - broadly - that something went wrong. HTTP status codes from 400-499, for example, tell the client that the client did something wrong. HTTP status codes from 500-599 tell the client that the server did something wrong. If you know your status codes, then this can be a _start_ in understanding how to work with the API. But, we can do better. After all, before a REST client is up and running, _somebody_ needs to develop it, and useful error messages can be invaluable in understanding an API. Errors that can be handled in a consistent way are even better! 
+
+https://github.com/blongden/vnd.error[`VndError`] is a popular, de-facto standard mime-type that describes the encoding of errors to the client of a REST service. It works well with errors in the 40x and 50x range of errors. Spring HATEOAS provides `VndError` types that you can use to report errors back to your client. 
+
+Our revised service introduces a new class, `BookmarkControllerAdvice`, that uses Spring MVC's `@ControllerAdvice` annotation. `@ControllerAdvice` are a useful way to extricate the configuration of common concerns - like error handling - into a separate place, away from any individual Spring MVC controller. Spring MVC, for example, defines the `@ExceptionHandler` method that ties a specific handler method to any incident of an `Exception` or a HTTP status code. Here, we're telling Spring MVC that any code that throws a `UserNotFoundException`, as before, should eventually be handled by the `userNotFoundExceptionHandler` method. This method simply wraps the propagated `Exception` in a `VndErrors` and returns it to the client. In this example, we've removed the `@ResponseStatus` annoation from the exceptio itself and centralized it in the `@ControllerAdvice` type.  `@ControllerAdvice` types are a convenient way to centralize all sorts of logic, and - unlike annotating exception types - can be used even for exception types to which you don't have the source code. 
 
 
 ## Securing a REST Service   
@@ -261,6 +267,11 @@ Spring Boot provides an embedded web server (Apache Tomcat, by default) that can
 include::{book-root}{security-application}[]
 ----   
 
+With Spring Security OAuth in place, we can rework our API a little bit. It makes little sense to have `userId` s strewn throughout the URIs for our API. After all, the user context is _implied_ in the secure access of our endpoints. Instead of requiring a `userId` in the path, the secure Spring MVC handler methods expect a `javax.security.Principal` that Spring Security injects on our behalf. This principal offers a `javax.security.Principal#getName` method that can be used in place of the `userId`. 
+
+
+## Conclusion 
+REST is the most natural way for ubiquitous, disparate clients to communicate. It works because HTTP works. Once you understand how REST fits into an application, it's not hard to envision an architecture with numerous, singly focused APIs all exposed over REST, load-balanced as any other HTTP service would be. It is not surprising, then, that REST (often, but not necessarily) forms a criticial foundation for _microservices_, which we'll look at in more depth in an upcoming tutorial. 
 
 
 // TODO: talk about storing Access Tokens in a single store that multiple client nodes use for federated ID in mind. Then show how you can use Spring Boot's autoconfiguration approach to share across an organization's services w/ no configuration apart from `@EnableAutoConfiguration`. Show an example of Spring Security OAuth persiting to Redis or something more horizontally scalable than a SQL DB.    

@@ -794,7 +794,7 @@ class BookmarkControllerAdvice {
     @ResponseBody
     @ExceptionHandler(UserNotFoundException.class)
     @ResponseStatus(HttpStatus.NOT_FOUND)
-    VndErrors vndErrors(UserNotFoundException ex) {
+    VndErrors userNotFoundExceptionHandler(UserNotFoundException ex) {
         return new VndErrors("error", ex.getMessage());
     }
 }
@@ -817,6 +817,18 @@ At a minimum, a resource should provide a link to itself (usually a link whose <
 </div>
 <div class="paragraph">
 <p>With this in place, the only remaining changes substitute  <code>Bookmark</code> types for <code>BookmarkResource</code> types.</p>
+</div>
+<div class="sect2">
+<h3 id="_improved_error_handling_with_code_vnderrors_code">Improved Error Handling with <code>VndErrors</code></h3>
+<div class="paragraph">
+<p>HATEOAS gives clients  improved metadata about the service itself. We can improve the situation for our error handling, as well. HTTP status codes tell the client - broadly - that something went wrong. HTTP status codes from 400-499, for example, tell the client that the client did something wrong. HTTP status codes from 500-599 tell the client that the server did something wrong. If you know your status codes, then this can be a <em>start</em> in understanding how to work with the API. But, we can do better. After all, before a REST client is up and running, <em>somebody</em> needs to develop it, and useful error messages can be invaluable in understanding an API. Errors that can be handled in a consistent way are even better!</p>
+</div>
+<div class="paragraph">
+<p><a href="https://github.com/blongden/vnd.error"><code>VndError</code></a> is a popular, de-facto standard mime-type that describes the encoding of errors to the client of a REST service. It works well with errors in the 40x and 50x range of errors. Spring HATEOAS provides <code>VndError</code> types that you can use to report errors back to your client.</p>
+</div>
+<div class="paragraph">
+<p>Our revised service introduces a new class, <code>BookmarkControllerAdvice</code>, that uses Spring MVC&#8217;s <code>@ControllerAdvice</code> annotation. <code>@ControllerAdvice</code> are a useful way to extricate the configuration of common concerns - like error handling - into a separate place, away from any individual Spring MVC controller. Spring MVC, for example, defines the <code>@ExceptionHandler</code> method that ties a specific handler method to any incident of an <code>Exception</code> or a HTTP status code. Here, we&#8217;re telling Spring MVC that any code that throws a <code>UserNotFoundException</code>, as before, should eventually be handled by the <code>userNotFoundExceptionHandler</code> method. This method simply wraps the propagated <code>Exception</code> in a <code>VndErrors</code> and returns it to the client. In this example, we&#8217;ve removed the <code>@ResponseStatus</code> annoation from the exceptio itself and centralized it in the <code>@ControllerAdvice</code> type.  <code>@ControllerAdvice</code> types are a convenient way to centralize all sorts of logic, and - unlike annotating exception types - can be used even for exception types to which you don&#8217;t have the source code.</p>
+</div>
 </div>
 </div>
 </div>
@@ -917,6 +929,7 @@ import org.springframework.core.io.Resource;
 import org.springframework.hateoas.Link;
 import org.springframework.hateoas.ResourceSupport;
 import org.springframework.hateoas.Resources;
+import org.springframework.hateoas.VndErrors;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
@@ -1041,8 +1054,8 @@ class WebSecurityConfiguration extends GlobalAuthenticationConfigurerAdapter {
     }
 
     @Bean
-    UserDetailsService userDetailsService ( ){
-        return  (username) -&gt;
+    UserDetailsService userDetailsService() {
+        return (username) -&gt;
                 accountRepository.findByUsername(username)
                         .map(a -&gt; new User(a.username, a.password, true, true, true, true, AuthorityUtils.createAuthorityList("USER", "write")))
                         .orElseThrow(() -&gt; new UsernameNotFoundException("could not find the user '" + username + "'"));
@@ -1106,48 +1119,95 @@ class BookmarkRestController {
     private final AccountRepository accountRepository;
 
     @RequestMapping(method = RequestMethod.POST)
-    ResponseEntity&lt;?&gt; add(@PathVariable String userId, @RequestBody Bookmark input) {
+    ResponseEntity&lt;?&gt; add(Principal principal, @RequestBody Bookmark input) {
+        String userId = principal.getName();
+        this.validateUser(userId);
+
         return accountRepository.findByUsername(userId)
                 .map(account -&gt; {
-                            Bookmark bookmark = bookmarkRepository.save(
-                                    new Bookmark(account, input.uri, input.description));
+                            Bookmark bookmark = bookmarkRepository.save(new Bookmark(account, input.uri, input.description));
+
                             HttpHeaders httpHeaders = new HttpHeaders();
+
                             Link forOneBookmark = new BookmarkResource(bookmark).getLink("self");
                             httpHeaders.setLocation(URI.create(forOneBookmark.getHref()));
+
                             return new ResponseEntity&lt;&gt;(null, httpHeaders, HttpStatus.CREATED);
                         }
-                ).orElseThrow(() -&gt; new RuntimeException("could not find the user '" + userId + "'"));
+                ).get();
     }
 
     @RequestMapping(value = "/{bookmarkId}", method = RequestMethod.GET)
-    BookmarkResource readBookmark(Principal principal,
-                                  @PathVariable Long bookmarkId) {
+    BookmarkResource readBookmark(Principal principal, @PathVariable Long bookmarkId) {
+        String userId = principal.getName();
+        this.validateUser(userId);
         return new BookmarkResource(this.bookmarkRepository.findOne(bookmarkId));
     }
 
+
     @RequestMapping(method = RequestMethod.GET)
     Resources&lt;BookmarkResource&gt; readBookmarks(Principal principal) {
-        List&lt;BookmarkResource&gt; bookmarkResourceList =
-                bookmarkRepository.findByAccountUsername(principal.getName()).stream()
-                        .map(BookmarkResource::new).collect(Collectors.toList());
+        String userId = principal.getName();
+        this.validateUser(userId);
+
+        List&lt;BookmarkResource&gt; bookmarkResourceList = bookmarkRepository.findByAccountUsername(userId)
+                .stream()
+                .map(BookmarkResource::new)
+                .collect(Collectors.toList());
         return new Resources&lt;BookmarkResource&gt;(bookmarkResourceList);
     }
 
     @Autowired
-    BookmarkRestController(BookmarkRepository bookmarkRepository, AccountRepository accountRepository) {
+    BookmarkRestController(BookmarkRepository bookmarkRepository,
+                           AccountRepository accountRepository) {
         this.bookmarkRepository = bookmarkRepository;
         this.accountRepository = accountRepository;
+    }
+
+    private void validateUser(String userId) {
+        this.accountRepository.findByUsername(userId)
+                .orElseThrow(() -&gt; new UserNotFoundException(userId));
+    }
+}
+
+@ControllerAdvice
+class BookmarkControllerAdvice {
+
+    @ResponseBody
+    @ExceptionHandler(UserNotFoundException.class)
+    @ResponseStatus(HttpStatus.NOT_FOUND)
+    VndErrors userNotFoundExceptionHandler(UserNotFoundException ex) {
+        return new VndErrors("error", ex.getMessage());
+    }
+}
+
+
+class UserNotFoundException extends RuntimeException {
+
+    public UserNotFoundException(String userId) {
+        super("could not find user '" + userId + "'.");
     }
 }</code></pre>
 </div>
 </div>
+<div class="paragraph">
+<p>With Spring Security OAuth in place, we can rework our API a little bit. It makes little sense to have <code>userId</code> s strewn throughout the URIs for our API. After all, the user context is <em>implied</em> in the secure access of our endpoints. Instead of requiring a <code>userId</code> in the path, the secure Spring MVC handler methods expect a <code>javax.security.Principal</code> that Spring Security injects on our behalf. This principal offers a <code>javax.security.Principal#getName</code> method that can be used in place of the <code>userId</code>.</p>
+</div>
+</div>
+</div>
+</div>
+<div class="sect1">
+<h2 id="_conclusion">Conclusion</h2>
+<div class="sectionbody">
+<div class="paragraph">
+<p>REST is the most natural way for ubiquitous, disparate clients to communicate. It works because HTTP works. Once you understand how REST fits into an application, it&#8217;s not hard to envision an architecture with numerous, singly focused APIs all exposed over REST, load-balanced as any other HTTP service would be. It is not surprising, then, that REST (often, but not necessarily) forms a criticial foundation for <em>microservices</em>, which we&#8217;ll look at in more depth in an upcoming tutorial.</p>
 </div>
 </div>
 </div>
 </div>
 <div id="footer">
 <div id="footer-text">
-Last updated 2014-09-28 20:37:59 PDT
+Last updated 2014-09-28 21:32:47 PDT
 </div>
 </div>
 </body>

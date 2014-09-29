@@ -127,7 +127,7 @@ class BookmarkControllerAdvice {
     @ResponseBody
     @ExceptionHandler(UserNotFoundException.class)
     @ResponseStatus(HttpStatus.NOT_FOUND)
-    VndErrors vndErrors(UserNotFoundException ex) {
+    VndErrors userNotFoundExceptionHandler(UserNotFoundException ex) {
         return new VndErrors("error", ex.getMessage());
     }
 }

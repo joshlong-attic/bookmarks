@@ -18,6 +18,7 @@ import org.springframework.core.io.Resource;
 import org.springframework.hateoas.Link;
 import org.springframework.hateoas.ResourceSupport;
 import org.springframework.hateoas.Resources;
+import org.springframework.hateoas.VndErrors;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
@@ -142,8 +143,8 @@ class WebSecurityConfiguration extends GlobalAuthenticationConfigurerAdapter {
     }
 
     @Bean
-    UserDetailsService userDetailsService ( ){
-        return  (username) ->
+    UserDetailsService userDetailsService() {
+        return (username) ->
                 accountRepository.findByUsername(username)
                         .map(a -> new User(a.username, a.password, true, true, true, true, AuthorityUtils.createAuthorityList("USER", "write")))
                         .orElseThrow(() -> new UsernameNotFoundException("could not find the user '" + username + "'"));
@@ -207,36 +208,72 @@ class BookmarkRestController {
     private final AccountRepository accountRepository;
 
     @RequestMapping(method = RequestMethod.POST)
-    ResponseEntity<?> add(@PathVariable String userId, @RequestBody Bookmark input) {
+    ResponseEntity<?> add(Principal principal, @RequestBody Bookmark input) {
+        String userId = principal.getName();
+        this.validateUser(userId);
+
         return accountRepository.findByUsername(userId)
                 .map(account -> {
-                            Bookmark bookmark = bookmarkRepository.save(
-                                    new Bookmark(account, input.uri, input.description));
+                            Bookmark bookmark = bookmarkRepository.save(new Bookmark(account, input.uri, input.description));
+
                             HttpHeaders httpHeaders = new HttpHeaders();
+
                             Link forOneBookmark = new BookmarkResource(bookmark).getLink("self");
                             httpHeaders.setLocation(URI.create(forOneBookmark.getHref()));
+
                             return new ResponseEntity<>(null, httpHeaders, HttpStatus.CREATED);
                         }
-                ).orElseThrow(() -> new RuntimeException("could not find the user '" + userId + "'"));
+                ).get();
     }
 
     @RequestMapping(value = "/{bookmarkId}", method = RequestMethod.GET)
-    BookmarkResource readBookmark(Principal principal,
-                                  @PathVariable Long bookmarkId) {
+    BookmarkResource readBookmark(Principal principal, @PathVariable Long bookmarkId) {
+        String userId = principal.getName();
+        this.validateUser(userId);
         return new BookmarkResource(this.bookmarkRepository.findOne(bookmarkId));
     }
 
+
     @RequestMapping(method = RequestMethod.GET)
     Resources<BookmarkResource> readBookmarks(Principal principal) {
-        List<BookmarkResource> bookmarkResourceList =
-                bookmarkRepository.findByAccountUsername(principal.getName()).stream()
-                        .map(BookmarkResource::new).collect(Collectors.toList());
+        String userId = principal.getName();
+        this.validateUser(userId);
+
+        List<BookmarkResource> bookmarkResourceList = bookmarkRepository.findByAccountUsername(userId)
+                .stream()
+                .map(BookmarkResource::new)
+                .collect(Collectors.toList());
         return new Resources<BookmarkResource>(bookmarkResourceList);
     }
 
     @Autowired
-    BookmarkRestController(BookmarkRepository bookmarkRepository, AccountRepository accountRepository) {
+    BookmarkRestController(BookmarkRepository bookmarkRepository,
+                           AccountRepository accountRepository) {
         this.bookmarkRepository = bookmarkRepository;
         this.accountRepository = accountRepository;
+    }
+
+    private void validateUser(String userId) {
+        this.accountRepository.findByUsername(userId)
+                .orElseThrow(() -> new UserNotFoundException(userId));
+    }
+}
+
+@ControllerAdvice
+class BookmarkControllerAdvice {
+
+    @ResponseBody
+    @ExceptionHandler(UserNotFoundException.class)
+    @ResponseStatus(HttpStatus.NOT_FOUND)
+    VndErrors userNotFoundExceptionHandler(UserNotFoundException ex) {
+        return new VndErrors("error", ex.getMessage());
+    }
+}
+
+
+class UserNotFoundException extends RuntimeException {
+
+    public UserNotFoundException(String userId) {
+        super("could not find user '" + userId + "'.");
     }
 }
